@@ -15,8 +15,11 @@
 #![deny(private_intra_doc_links)]
 #![allow(bare_trait_objects)]
 #![allow(ellipsis_inclusive_range_patterns)]
+#![allow(clippy::drop_non_drop)]
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
 mod channel_request;
+mod events;
 mod jit_channel;
 mod transport;
+mod utils;

@@ -6,7 +6,7 @@ jobs:
   build:
     strategy:
       matrix:
-        toolchain: [ stable, beta ]
+        toolchain: [ 1.48, stable, beta ]
         include:
           - toolchain: stable
             check-fmt: true
