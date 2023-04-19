@@ -8,17 +8,48 @@
 // licenses.
 
 //! Types and primitives for [JSON-RPC 2.0 specification](https://www.jsonrpc.org/specification).
-use std::{collections::HashMap, fmt::Display, str::FromStr};
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
+use std::fmt::Display;
+use std::str::FromStr;
 
 pub const VERSION: &str = "2.0";
 pub const INVALID_REQUEST_ERROR_CODE: i32 = -32600;
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Prefix {
+	LSPS0,
+	LSPS1,
+	LSPS2,
+}
+
+impl FromStr for Prefix {
+	type Err = ParseMethodError;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		match s {
+			"lsp0" => Ok(Prefix::LSPS0),
+			"lsp1" => Ok(Prefix::LSPS1),
+			"lsp2" => Ok(Prefix::LSPS2),
+			_ => Err(ParseMethodError),
+		}
+	}
+}
+
+impl Display for Prefix {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			Prefix::LSPS0 => write!(f, "lsps0"),
+			Prefix::LSPS1 => write!(f, "lsps1"),
+			Prefix::LSPS2 => write!(f, "lsps2"),
+		}
+	}
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Method {
-	pub prefix: String,
+	pub prefix: Prefix,
 	pub name: String,
 }
 
@@ -36,7 +67,7 @@ impl FromStr for Method {
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		let mut split = s.split('.');
-		let prefix = split.next().ok_or(ParseMethodError)?.to_string();
+		let prefix = split.next().ok_or(ParseMethodError)?.parse()?;
 		let name = split.next().ok_or(ParseMethodError)?.to_string();
 		Ok(Method { prefix, name })
 	}
@@ -247,7 +278,7 @@ mod tests {
 		assert_eq!(
 			request,
 			Request {
-				method: Method { prefix: "prefix".to_string(), name: "name".to_string() },
+				method: Method { prefix: Prefix::LSPS0, name: "name".to_string() },
 				params: vec![("a".to_string(), json!(5)),].into_iter().collect(),
 				id: json!(3),
 				jsonrpc: "2.0".to_string(),
@@ -258,7 +289,7 @@ mod tests {
 	#[test]
 	fn serializes_request_method() {
 		let request = Request {
-			method: Method { prefix: "prefix".to_string(), name: "name".to_string() },
+			method: Method { prefix: Prefix::LSPS0, name: "name".to_string() },
 			params: vec![("a".to_string(), json!(5))].into_iter().collect(),
 			id: json!(3),
 			jsonrpc: "2.0".to_string(),

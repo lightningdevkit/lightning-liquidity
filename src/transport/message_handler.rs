@@ -1,94 +1,78 @@
 use crate::events::{Event, EventHandler};
-use crate::transport::{jsonrpc, msgs};
-use crate::utils;
+use crate::transport::jsonrpc;
+use crate::transport::jsonrpc::Prefix;
+use crate::transport::msgs;
+use crate::transport::msgs::LSPSMessage;
 use bitcoin::secp256k1::PublicKey;
-use lightning::chain::keysinterface::EntropySource;
-use lightning::{
-	ln::{peer_handler::CustomMessageHandler, wire::CustomMessageReader},
-	log_info,
-	util::logger::Logger,
-};
-use std::{collections::HashMap, io, ops::Deref, sync::Mutex};
+use lightning::ln::peer_handler::CustomMessageHandler;
+use lightning::ln::wire::CustomMessageReader;
+use lightning::log_info;
+use lightning::util::logger::Logger;
+use std::collections::HashMap;
+use std::convert::{TryFrom, TryInto};
+use std::io;
+use std::ops::Deref;
+use std::sync::Arc;
+use std::sync::Mutex;
 
-pub trait LSPMessageHandler {
+pub trait ProtocolMessageHandler {
+	type ProtocolRequest: TryFrom<jsonrpc::Request>;
+	type ProtocolResponse: TryFrom<(jsonrpc::Request, jsonrpc::Response)>;
+	type ProtocolNotification: TryFrom<jsonrpc::Notification>;
+	type ProtocolMessage: Into<msgs::LSPSMessage>;
+
 	fn handle_lsps_request(
-		&self, request: jsonrpc::Request, counterparty_node_id: &PublicKey,
+		&self, request: Self::ProtocolRequest, counterparty_node_id: &PublicKey,
 	) -> Result<(), lightning::ln::msgs::LightningError>;
 	fn handle_lsps_response(
-		&self, request: jsonrpc::Request, response: jsonrpc::Response,
-		counterparty_node_id: &PublicKey,
+		&self, response: Self::ProtocolResponse, counterparty_node_id: &PublicKey,
 	) -> Result<(), lightning::ln::msgs::LightningError>;
 	fn handle_lsps_notification(
-		&self, notification: jsonrpc::Notification, counterparty_node_id: &PublicKey,
+		&self, notification: Self::ProtocolNotification, counterparty_node_id: &PublicKey,
 	) -> Result<(), lightning::ln::msgs::LightningError>;
-	fn get_and_clear_pending_msg(&self) -> Vec<(PublicKey, msgs::RawLSPSMessage)>;
-	fn get_protocol_number(&self) -> u16;
+	fn get_and_clear_pending_msg(&self) -> Vec<(PublicKey, Self::ProtocolMessage)>;
+	fn get_and_clear_pending_events(&self) -> Vec<Event>;
+	fn get_protocol_number(&self) -> Option<u16>;
 }
 
-pub struct LSPManager<LMH: Deref, L: Deref, ES: Deref>
+pub struct LSPManager<PMH: Deref, L: Deref>
 where
-	LMH::Target: LSPMessageHandler,
+	PMH::Target: ProtocolMessageHandler,
 	L::Target: Logger,
-	ES::Target: EntropySource,
 {
 	pending_messages: Mutex<Vec<(PublicKey, msgs::RawLSPSMessage)>>,
 	pending_requests: Mutex<HashMap<String, jsonrpc::Request>>,
-	message_handlers: Mutex<HashMap<String, LMH>>,
-	pending_events: Mutex<Vec<Event>>,
+	message_handlers: Arc<Mutex<HashMap<Prefix, PMH>>>,
 	logger: L,
-	entropy_source: ES,
 }
 
-impl<LMH: Deref, L: Deref, ES: Deref> LSPManager<LMH, L, ES>
+impl<PMH: Deref, L: Deref> LSPManager<PMH, L>
 where
-	LMH::Target: LSPMessageHandler,
+	PMH::Target: ProtocolMessageHandler,
 	L::Target: Logger,
-	ES::Target: EntropySource,
 {
-	pub fn new(logger: L, entropy_source: ES) -> Self {
+	pub fn new(logger: L) -> Self {
 		Self {
 			pending_messages: Mutex::new(Vec::new()),
 			pending_requests: Mutex::new(HashMap::new()),
-			message_handlers: Mutex::new(HashMap::new()),
-			pending_events: Mutex::new(Vec::new()),
+			message_handlers: Arc::new(Mutex::new(HashMap::new())),
 			logger,
-			entropy_source,
 		}
 	}
 
-	pub fn generate_request_id(&self) -> String {
-		let bytes = self.entropy_source.get_secure_random_bytes();
-		utils::hex_str(&bytes[0..16])
-	}
-
-	pub fn register_message_handler(&self, prefix: String, message_handler: LMH) {
+	pub fn register_message_handler(&self, prefix: Prefix, message_handler: PMH) {
 		self.message_handlers.lock().unwrap().insert(prefix, message_handler);
 	}
 
-	pub fn list_protocols(
-		&self, counterparty_node_id: PublicKey,
-	) -> Result<(), lightning::ln::msgs::LightningError> {
-		let request = jsonrpc::Request {
-			jsonrpc: jsonrpc::VERSION.to_string(),
-			id: serde_json::Value::String(self.generate_request_id()),
-			method: jsonrpc::Method {
-				prefix: "lsps0".to_string(),
-				name: "listprotocols".to_string(),
-			},
-			params: HashMap::new(),
-		};
-
-		let msg = msgs::RawLSPSMessage { payload: serde_json::to_string(&request).unwrap() };
-
-		self.insert_pending_request(request);
-
-		self.enqueue_message(counterparty_node_id, msg);
-		Ok(())
-	}
-
 	pub fn process_pending_events<H: EventHandler>(&self, handler: H) {
-		let mut pending_events = self.pending_events.lock().unwrap();
-		pending_events.drain(..).for_each(|event| handler.handle_event(event));
+		let message_handlers = self.message_handlers.lock().unwrap();
+
+		for message_handler in message_handlers.values() {
+			let events = message_handler.get_and_clear_pending_events();
+			for event in events {
+				handler.handle_event(event);
+			}
+		}
 	}
 
 	fn handle_lsps_message(
@@ -96,34 +80,16 @@ where
 	) -> Result<(), lightning::ln::msgs::LightningError> {
 		match msg {
 			msgs::LSPSMessage::Request(request) => {
-				if request.method.prefix == "lsps0" && request.method.name == "listprotocols" {
-					let mut protocols = vec![];
-					let message_handlers = self.message_handlers.lock().unwrap();
-					for message_handler in message_handlers.values() {
-						protocols.push(message_handler.get_protocol_number());
-					}
-
-					let response = msgs::LSPSMessage::Response(jsonrpc::Response::Success(
-						jsonrpc::SuccessResponse {
-							id: request.id,
-							result: protocols.into(),
-							jsonrpc: jsonrpc::VERSION.to_string(),
-						},
-					));
-
-					self.enqueue_message(
-						*sender_node_id,
-						msgs::RawLSPSMessage { payload: serde_json::to_string(&response).unwrap() },
-					);
-					return Ok(());
-				}
-
 				let message_handlers = self.message_handlers.lock().unwrap();
 
 				match message_handlers.get(&request.method.prefix) {
-					Some(message_handler) => {
-						message_handler.handle_lsps_request(request, sender_node_id)
-					}
+					Some(message_handler) => match request.try_into() {
+						Ok(request) => message_handler.handle_lsps_request(request, sender_node_id),
+						Err(_) => {
+							self.send_invalid_request(sender_node_id);
+							Ok(())
+						}
+					},
 					None => {
 						// TODO: really should be something like unsupported request?
 						self.send_invalid_request(sender_node_id);
@@ -134,34 +100,18 @@ where
 			msgs::LSPSMessage::Response(response) => {
 				match self.get_pending_request(response.get_id()) {
 					Some(request) => {
-						if request.method.prefix == "lsps0"
-							&& request.method.name == "listprotocols"
-						{
-							match response {
-								jsonrpc::Response::Success(success) => {
-									if let Ok(protocols) =
-										serde_json::from_value::<Vec<u16>>(success.result)
-									{
-										self.enqueue_event(Event::ListProtocols {
-											protocols,
-											counterparty_node_id: *sender_node_id,
-										});
-									}
-								}
-								jsonrpc::Response::Error(error) => {
-									println!("Error: {:?}", error);
-								}
-							}
-							return Ok(());
-						}
 						let message_handlers = self.message_handlers.lock().unwrap();
 
 						match message_handlers.get(&request.method.prefix) {
-							Some(message_handler) => message_handler.handle_lsps_response(
-								request,
-								response,
-								sender_node_id,
-							),
+							Some(message_handler) => match (request, response.clone()).try_into() {
+								Ok(response) => {
+									message_handler.handle_lsps_response(response, sender_node_id)
+								}
+								Err(_) => {
+									log_info!(self.logger, "Received response we cannot convert to expected type: {:?}", response);
+									Ok(())
+								}
+							},
 							None => {
 								log_info!(self.logger, "Receive response for request we no longer have message handler for: {:?}", response);
 								Ok(())
@@ -183,7 +133,14 @@ where
 
 				match message_handlers.get(&notification.method.prefix) {
 					Some(message_handler) => {
-						message_handler.handle_lsps_notification(notification, sender_node_id)
+						match notification.clone().try_into() {
+							Ok(notification) => message_handler
+								.handle_lsps_notification(notification, sender_node_id),
+							Err(_) => {
+								log_info!(self.logger, "Received notification we cannot convert to expected type: {:?}", notification);
+								Ok(())
+							}
+						}
 					}
 					None => {
 						log_info!(
@@ -221,11 +178,6 @@ where
 		pending_msgs.push((node_id, msg));
 	}
 
-	fn enqueue_event(&self, event: Event) {
-		let mut pending_events = self.pending_events.lock().unwrap();
-		pending_events.push(event);
-	}
-
 	fn insert_pending_request(&self, request: jsonrpc::Request) {
 		let mut pending_requests = self.pending_requests.lock().unwrap();
 		pending_requests.insert(request.id.to_string(), request);
@@ -237,11 +189,10 @@ where
 	}
 }
 
-impl<LMH: Deref, L: Deref, ES: Deref> CustomMessageReader for LSPManager<LMH, L, ES>
+impl<PMH: Deref, L: Deref> CustomMessageReader for LSPManager<PMH, L>
 where
-	LMH::Target: LSPMessageHandler,
+	PMH::Target: ProtocolMessageHandler,
 	L::Target: Logger,
-	ES::Target: EntropySource,
 {
 	type CustomMessage = msgs::RawLSPSMessage;
 
@@ -259,11 +210,10 @@ where
 	}
 }
 
-impl<LMH: Deref, L: Deref, ES: Deref> CustomMessageHandler for LSPManager<LMH, L, ES>
+impl<PMH: Deref, L: Deref> CustomMessageHandler for LSPManager<PMH, L>
 where
-	LMH::Target: LSPMessageHandler,
+	PMH::Target: ProtocolMessageHandler,
 	L::Target: Logger,
-	ES::Target: EntropySource,
 {
 	fn handle_custom_message(
 		&self, msg: Self::CustomMessage, sender_node_id: &PublicKey,
@@ -289,8 +239,14 @@ where
 
 		let message_handlers = self.message_handlers.lock().unwrap();
 		for message_handler in message_handlers.values() {
-			let lsps_messages = message_handler.get_and_clear_pending_msg();
-			msgs.extend(lsps_messages);
+			let protocol_messages = message_handler.get_and_clear_pending_msg();
+			msgs.extend(protocol_messages.into_iter().map(|(node_id, protocol_msg)| {
+				let lsp_message: LSPSMessage = protocol_msg.into();
+				(
+					node_id,
+					msgs::RawLSPSMessage { payload: serde_json::to_string(&lsp_message).unwrap() },
+				)
+			}));
 		}
 
 		msgs

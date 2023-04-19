@@ -12,3 +12,4 @@
 pub mod jsonrpc;
 pub mod message_handler;
 pub mod msgs;
+pub mod protocol;
