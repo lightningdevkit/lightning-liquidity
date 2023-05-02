@@ -9,7 +9,6 @@
 
 //! Types and primitives that implement the LSPS0: Transport Layer specification.
 
-pub mod jsonrpc;
 pub mod message_handler;
 pub mod msgs;
 pub mod protocol;
