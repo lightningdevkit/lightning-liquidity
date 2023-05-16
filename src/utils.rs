@@ -67,3 +67,13 @@ pub fn parse_pubkey(pubkey_str: &str) -> Result<PublicKey, std::io::Error> {
 
 	Ok(pubkey.unwrap())
 }
+
+pub fn compute_opening_fee(
+	payment_size_msat: u64, opening_fee_min_fee_msat: u64, opening_fee_proportional: u64,
+) -> Option<u64> {
+	let t1 = payment_size_msat.checked_mul(opening_fee_proportional)?;
+	let t2 = t1.checked_add(999999)?;
+	let t3 = t2.checked_div(1000000)?;
+	let t4 = std::cmp::max(t3, opening_fee_min_fee_msat);
+	Some(t4)
+}

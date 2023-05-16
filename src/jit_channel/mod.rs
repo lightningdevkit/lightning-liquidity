@@ -7,4 +7,8 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
-//! Types and primitives that implement the LSPS3: JIT Channel Negotiation specification.
+//! Types and primitives that implement the LSPS2: JIT Channel Negotiation specification.
+pub mod channel_manager;
+pub mod event;
+pub mod msgs;
+pub mod scid_utils;
