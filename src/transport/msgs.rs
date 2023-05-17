@@ -9,6 +9,18 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
 
+const LSPS_MESSAGE_SERIALIZED_STRUCT_NAME: &str = "LSPSMessage";
+const JSONRPC_FIELD_KEY: &str = "jsonrpc";
+const JSONRPC_FIELD_VALUE: &str = "2.0";
+const JSONRPC_METHOD_FIELD_KEY: &str = "method";
+const JSONRPC_ID_FIELD_KEY: &str = "id";
+const JSONRPC_PARAMS_FIELD_KEY: &str = "params";
+const JSONRPC_RESULT_FIELD_KEY: &str = "result";
+const JSONRPC_ERROR_FIELD_KEY: &str = "error";
+const JSONRPC_INVALID_MESSAGE_ERROR_CODE: i32 = -32700;
+const JSONRPC_INVALID_MESSAGE_ERROR_MESSAGE: &str = "parse error";
+const LSPS0_LISTPROTOCOLS_METHOD_NAME: &str = "lsps0.listprotocols";
+
 pub const LSPS_MESSAGE_TYPE: u16 = 37913;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -118,39 +130,43 @@ impl Serialize for LSPSMessage {
 	where
 		S: serde::Serializer,
 	{
-		let mut jsonrpc_object = serializer.serialize_struct("LSPSMessage", 3)?;
+		let mut jsonrpc_object =
+			serializer.serialize_struct(LSPS_MESSAGE_SERIALIZED_STRUCT_NAME, 3)?;
 
-		jsonrpc_object.serialize_field("jsonrpc", "2.0")?;
+		jsonrpc_object.serialize_field(JSONRPC_FIELD_KEY, JSONRPC_FIELD_VALUE)?;
 
 		match self {
 			LSPSMessage::LSPS0(LSPS0Message::Request(request_id, request)) => {
-				jsonrpc_object.serialize_field("method", request.method())?;
-				jsonrpc_object.serialize_field("id", &request_id.0)?;
+				jsonrpc_object.serialize_field(JSONRPC_METHOD_FIELD_KEY, request.method())?;
+				jsonrpc_object.serialize_field(JSONRPC_ID_FIELD_KEY, &request_id.0)?;
 
 				match request {
 					LSPS0Request::ListProtocols(params) => {
-						jsonrpc_object.serialize_field("params", params)?
+						jsonrpc_object.serialize_field(JSONRPC_PARAMS_FIELD_KEY, params)?
 					}
 				};
 			}
 			LSPSMessage::LSPS0(LSPS0Message::Response(request_id, response)) => {
-				jsonrpc_object.serialize_field("id", &request_id.0)?;
+				jsonrpc_object.serialize_field(JSONRPC_ID_FIELD_KEY, &request_id.0)?;
 
 				match response {
 					LSPS0Response::ListProtocols(result) => {
-						jsonrpc_object.serialize_field("result", result)?;
+						jsonrpc_object.serialize_field(JSONRPC_RESULT_FIELD_KEY, result)?;
 					}
 					LSPS0Response::ListProtocolsError(error) => {
-						jsonrpc_object.serialize_field("error", error)?;
+						jsonrpc_object.serialize_field(JSONRPC_ERROR_FIELD_KEY, error)?;
 					}
 				}
 			}
 			LSPSMessage::Invalid => {
-				let error =
-					ResponseError { code: -32700, message: "parse error".to_string(), data: None };
+				let error = ResponseError {
+					code: JSONRPC_INVALID_MESSAGE_ERROR_CODE,
+					message: JSONRPC_INVALID_MESSAGE_ERROR_MESSAGE.to_string(),
+					data: None,
+				};
 
-				jsonrpc_object.serialize_field("id", &serde_json::Value::Null)?;
-				jsonrpc_object.serialize_field("error", &error)?;
+				jsonrpc_object.serialize_field(JSONRPC_ID_FIELD_KEY, &serde_json::Value::Null)?;
+				jsonrpc_object.serialize_field(JSONRPC_ERROR_FIELD_KEY, &error)?;
 			}
 		}
 
@@ -202,59 +218,63 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 			}
 		}
 
-		if let Some(method) = method {
-			if let Some(id) = id {
-				match method {
-					"lsps0.listprotocols" => {
-						let list_protocols_request =
-							serde_json::from_value(params.unwrap_or(json!({})))
-								.map_err(de::Error::custom)?;
+		match (id, method) {
+			(Some(id), Some(method)) => match method {
+				LSPS0_LISTPROTOCOLS_METHOD_NAME => {
+					let list_protocols_request =
+						serde_json::from_value(params.unwrap_or(json!({})))
+							.map_err(de::Error::custom)?;
 
-						self.request_id_to_method.insert(id.clone(), method.to_string());
+					self.request_id_to_method.insert(id.clone(), method.to_string());
 
-						Ok(LSPSMessage::LSPS0(LSPS0Message::Request(
-							RequestId(id),
-							LSPS0Request::ListProtocols(list_protocols_request),
-						)))
-					}
-					_ => Err(de::Error::custom(format!(
-						"Received request with unknown method: {}",
-						method
-					))),
+					Ok(LSPSMessage::LSPS0(LSPS0Message::Request(
+						RequestId(id),
+						LSPS0Request::ListProtocols(list_protocols_request),
+					)))
 				}
-			} else {
+				_ => Err(de::Error::custom(format!(
+					"Received request with unknown method: {}",
+					method
+				))),
+			},
+			(Some(id), None) => {
+				if let Some(method) = self.request_id_to_method.get(&id) {
+					match method.as_str() {
+						LSPS0_LISTPROTOCOLS_METHOD_NAME => {
+							if let Some(error) = error {
+								Ok(LSPSMessage::LSPS0(LSPS0Message::Response(
+									RequestId(id),
+									LSPS0Response::ListProtocolsError(error),
+								)))
+							} else if let Some(result) = result {
+								let list_protocols_response =
+									serde_json::from_value(result).map_err(de::Error::custom)?;
+								Ok(LSPSMessage::LSPS0(LSPS0Message::Response(
+									RequestId(id),
+									LSPS0Response::ListProtocols(list_protocols_response),
+								)))
+							} else {
+								Err(de::Error::custom("Received invalid JSON-RPC object: one of method, result, or error required"))
+							}
+						}
+						_ => Err(de::Error::custom(format!(
+							"Received response for an unknown request method: {}",
+							method
+						))),
+					}
+				} else {
+					Err(de::Error::custom(format!(
+						"Received response for unknown request id: {}",
+						id
+					)))
+				}
+			}
+			(None, Some(method)) => {
 				Err(de::Error::custom(format!("Received unknown notification: {}", method)))
 			}
-		} else if let Some(id) = id {
-			if let Some(method) = self.request_id_to_method.get(&id) {
-				match method.as_str() {
-					"lsps0.listprotocols" => {
-						if let Some(error) = error {
-							Ok(LSPSMessage::LSPS0(LSPS0Message::Response(
-								RequestId(id),
-								LSPS0Response::ListProtocolsError(error),
-							)))
-						} else if let Some(result) = result {
-							let list_protocols_response =
-								serde_json::from_value(result).map_err(de::Error::custom)?;
-							Ok(LSPSMessage::LSPS0(LSPS0Message::Response(
-								RequestId(id),
-								LSPS0Response::ListProtocols(list_protocols_response),
-							)))
-						} else {
-							Err(de::Error::custom("Received invalid JSON-RPC object: one of method, result, or error required"))
-						}
-					}
-					_ => Err(de::Error::custom(format!(
-						"Received response for an unknown request method: {}",
-						method
-					))),
-				}
-			} else {
-				Err(de::Error::custom(format!("Received response for unknown request id: {}", id)))
-			}
-		} else {
-			Err(de::Error::custom("Received invalid JSON-RPC object: one of method or id required"))
+			(None, None) => Err(de::Error::custom(
+				"Received invalid JSON-RPC object: one of method or id required",
+			)),
 		}
 	}
 }

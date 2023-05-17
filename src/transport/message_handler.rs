@@ -3,23 +3,36 @@ use crate::transport::msgs::{LSPSMessage, Prefix, RawLSPSMessage, LSPS_MESSAGE_T
 use bitcoin::secp256k1::PublicKey;
 use lightning::ln::peer_handler::CustomMessageHandler;
 use lightning::ln::wire::CustomMessageReader;
+use lightning::log_info;
+use lightning::util::logger::Logger;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::io;
+use std::ops::Deref;
 use std::sync::{Arc, Mutex};
 
+/// A trait used to implement a specific LSPS protocol
+/// The messages the protocol uses need to be able to be mapped
+/// from and into LSPSMessages.
 pub trait ProtocolMessageHandler {
 	type ProtocolMessage: TryFrom<LSPSMessage> + Into<LSPSMessage>;
+	const PROTOCOL_NUMBER: Option<u16>;
 
 	fn handle_message(
 		&self, message: Self::ProtocolMessage, counterparty_node_id: &PublicKey,
 	) -> Result<(), lightning::ln::msgs::LightningError>;
 	fn get_and_clear_pending_protocol_messages(&self) -> Vec<(PublicKey, Self::ProtocolMessage)>;
 	fn get_and_clear_pending_protocol_events(&self) -> Vec<Event>;
-	fn get_protocol_number(&self) -> Option<u16>;
+	fn get_protocol_number(&self) -> Option<u16> {
+		Self::PROTOCOL_NUMBER
+	}
 }
 
-pub trait MessageHandler {
+/// A trait used to implement the mapping from a LSPS transport layer mesage
+/// to a specific protocol message. This enables the ProtocolMessageHandler's
+/// to not need to know about LSPSMessage and only have to deal with the specific
+/// messages related to the protocol that is being implemented.
+pub trait TransportMessageHandler {
 	fn handle_lsps_message(
 		&self, message: LSPSMessage, counterparty_node_id: &PublicKey,
 	) -> Result<(), lightning::ln::msgs::LightningError>;
@@ -28,7 +41,7 @@ pub trait MessageHandler {
 	fn get_protocol_number(&self) -> Option<u16>;
 }
 
-impl<T> MessageHandler for T
+impl<T> TransportMessageHandler for T
 where
 	T: ProtocolMessageHandler,
 	LSPSMessage: TryInto<<T as ProtocolMessageHandler>::ProtocolMessage>,
@@ -59,27 +72,37 @@ where
 	}
 }
 
-pub struct LSPManager {
+pub struct LSPManager<L: Deref>
+where
+	L::Target: Logger,
+{
+	logger: L,
 	pending_messages: Mutex<Vec<(PublicKey, RawLSPSMessage)>>,
 	request_id_to_method_map: Mutex<HashMap<String, String>>,
-	message_handlers: Arc<Mutex<HashMap<Prefix, Arc<dyn MessageHandler>>>>,
+	message_handlers: Arc<Mutex<HashMap<Prefix, Arc<dyn TransportMessageHandler>>>>,
 }
 
-impl LSPManager {
-	pub fn new() -> Self {
+impl<L: Deref> LSPManager<L>
+where
+	L::Target: Logger,
+{
+	pub fn new(logger: L) -> Self {
 		Self {
+			logger,
 			pending_messages: Mutex::new(Vec::new()),
 			request_id_to_method_map: Mutex::new(HashMap::new()),
 			message_handlers: Arc::new(Mutex::new(HashMap::new())),
 		}
 	}
 
-	pub fn get_message_handlers(&self) -> Arc<Mutex<HashMap<Prefix, Arc<dyn MessageHandler>>>> {
+	pub fn get_message_handlers(
+		&self,
+	) -> Arc<Mutex<HashMap<Prefix, Arc<dyn TransportMessageHandler>>>> {
 		self.message_handlers.clone()
 	}
 
 	pub fn register_message_handler(
-		&self, prefix: Prefix, message_handler: Arc<dyn MessageHandler>,
+		&self, prefix: Prefix, message_handler: Arc<dyn TransportMessageHandler>,
 	) {
 		self.message_handlers.lock().unwrap().insert(prefix, message_handler);
 	}
@@ -103,6 +126,13 @@ impl LSPManager {
 			// TODO: not sure what we are supposed to do when we receive a message we don't have a handler for
 			if let Some(message_handler) = message_handlers.get(&prefix) {
 				message_handler.handle_lsps_message(msg, sender_node_id)?;
+			} else {
+				log_info!(
+					self.logger,
+					"Received a message from {:?} we do not have a handler for: {:?}",
+					sender_node_id,
+					msg
+				);
 			}
 		}
 		Ok(())
@@ -114,7 +144,10 @@ impl LSPManager {
 	}
 }
 
-impl CustomMessageReader for LSPManager {
+impl<L: Deref> CustomMessageReader for LSPManager<L>
+where
+	L::Target: Logger,
+{
 	type CustomMessage = RawLSPSMessage;
 
 	fn read<R: io::Read>(
@@ -131,7 +164,10 @@ impl CustomMessageReader for LSPManager {
 	}
 }
 
-impl CustomMessageHandler for LSPManager {
+impl<L: Deref> CustomMessageHandler for LSPManager<L>
+where
+	L::Target: Logger,
+{
 	fn handle_custom_message(
 		&self, msg: Self::CustomMessage, sender_node_id: &PublicKey,
 	) -> Result<(), lightning::ln::msgs::LightningError> {

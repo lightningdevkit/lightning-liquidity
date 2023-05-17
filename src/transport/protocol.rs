@@ -10,7 +10,7 @@ use crate::events::Event;
 use crate::transport::message_handler::ProtocolMessageHandler;
 use crate::utils;
 
-use super::message_handler::MessageHandler;
+use super::message_handler::TransportMessageHandler;
 use super::msgs::{
 	LSPS0Message, LSPS0Request, LSPS0Response, ListProtocolsRequest, ListProtocolsResponse, Prefix,
 	RequestId, ResponseError,
@@ -22,7 +22,7 @@ where
 	ES::Target: EntropySource,
 {
 	logger: L,
-	message_handlers: Arc<Mutex<HashMap<Prefix, Arc<dyn MessageHandler>>>>,
+	message_handlers: Arc<Mutex<HashMap<Prefix, Arc<dyn TransportMessageHandler>>>>,
 	pending_messages: Mutex<Vec<(PublicKey, LSPS0Message)>>,
 	entropy_source: ES,
 	pending_events: Mutex<Vec<Event>>,
@@ -34,7 +34,7 @@ where
 	ES::Target: EntropySource,
 {
 	pub fn new(
-		logger: L, message_handlers: Arc<Mutex<HashMap<Prefix, Arc<dyn MessageHandler>>>>,
+		logger: L, message_handlers: Arc<Mutex<HashMap<Prefix, Arc<dyn TransportMessageHandler>>>>,
 		entropy_source: ES,
 	) -> Self {
 		Self {
@@ -128,6 +128,7 @@ where
 	ES::Target: EntropySource,
 {
 	type ProtocolMessage = LSPS0Message;
+	const PROTOCOL_NUMBER: Option<u16> = None;
 
 	fn handle_message(
 		&self, message: Self::ProtocolMessage, counterparty_node_id: &PublicKey,
@@ -153,10 +154,6 @@ where
 		let mut pending_events = self.pending_events.lock().unwrap();
 		std::mem::take(&mut *pending_events)
 	}
-
-	fn get_protocol_number(&self) -> Option<u16> {
-		None
-	}
 }
 
 #[cfg(test)]
@@ -180,7 +177,7 @@ mod tests {
 	fn test_handle_list_protocols_request() {
 		let logger = Arc::new(TestLogger {});
 		let entropy = Arc::new(TestEntropy {});
-		let message_handlers: Arc<Mutex<HashMap<Prefix, Arc<dyn MessageHandler>>>> =
+		let message_handlers: Arc<Mutex<HashMap<Prefix, Arc<dyn TransportMessageHandler>>>> =
 			Arc::new(Mutex::new(HashMap::new()));
 		let lsps0_handler =
 			Arc::new(LSPS0MessageHandler::new(logger, message_handlers.clone(), entropy));
