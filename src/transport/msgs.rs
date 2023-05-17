@@ -218,11 +218,12 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 						)))
 					}
 					_ => Err(de::Error::custom(format!(
-						"Received request with unknown method: {method}"
+						"Received request with unknown method: {}",
+						method
 					))),
 				}
 			} else {
-				Err(de::Error::custom(format!("Received unknown notification: {method}")))
+				Err(de::Error::custom(format!("Received unknown notification: {}", method)))
 			}
 		} else if let Some(id) = id {
 			if let Some(method) = self.request_id_to_method.get(&id) {
@@ -245,11 +246,12 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 						}
 					}
 					_ => Err(de::Error::custom(format!(
-						"Received response for an unknown request method: {method}"
+						"Received response for an unknown request method: {}",
+						method
 					))),
 				}
 			} else {
-				Err(de::Error::custom(format!("Received response for unknown request id: {id}")))
+				Err(de::Error::custom(format!("Received response for unknown request id: {}", id)))
 			}
 		} else {
 			Err(de::Error::custom("Received invalid JSON-RPC object: one of method or id required"))
