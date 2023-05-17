@@ -6,11 +6,16 @@ jobs:
   build:
     strategy:
       matrix:
-        toolchain: [ 1.48, stable, beta ]
+        platform: [ ubuntu-latest ]
+        toolchain: [ stable, beta ]
         include:
           - toolchain: stable
             check-fmt: true
-    runs-on: ubuntu-latest
+          - toolchain: 1.48.0
+            platform: ubuntu-latest
+            msrv: true
+
+    runs-on: ${{ matrix.platform }}
     steps:
       - name: Checkout source code
         uses: actions/checkout@v2
@@ -20,6 +25,12 @@ jobs:
           toolchain: ${{ matrix.toolchain }}
           override: true
           profile: minimal
+      - name: Pin tokio for MSRV
+        if: matrix.msrv
+        run: cargo update -p tokio --precise "1.14.0" --verbose
+      - name: Pin serde for MSRV
+        if: matrix.msrv
+        run: cargo update -p serde --precise "1.0.156" --verbose
       - name: Build on Rust ${{ matrix.toolchain }}
         run: cargo build --verbose --color always
       - name: Check formatting
