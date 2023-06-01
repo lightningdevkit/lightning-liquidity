@@ -1,10 +1,10 @@
 use bitcoin::secp256k1::PublicKey;
 use lightning::chain::keysinterface::EntropySource;
-use lightning::log_error;
+use lightning::{log_error, log_info};
 use lightning::util::logger::Logger;
 use std::collections::HashMap;
 use std::ops::Deref;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use crate::events::Event;
 use crate::transport::message_handler::ProtocolMessageHandler;
@@ -22,7 +22,7 @@ where
 	ES::Target: EntropySource,
 {
 	logger: L,
-	message_handlers: Arc<Mutex<HashMap<Prefix, Arc<dyn TransportMessageHandler>>>>,
+	message_handlers: Arc<RwLock<HashMap<Prefix, Arc<dyn TransportMessageHandler + Send + Sync>>>>,
 	pending_messages: Mutex<Vec<(PublicKey, LSPS0Message)>>,
 	entropy_source: ES,
 	pending_events: Mutex<Vec<Event>>,
@@ -34,7 +34,7 @@ where
 	ES::Target: EntropySource,
 {
 	pub fn new(
-		logger: L, message_handlers: Arc<Mutex<HashMap<Prefix, Arc<dyn TransportMessageHandler>>>>,
+		logger: L, message_handlers: Arc<RwLock<HashMap<Prefix, Arc<dyn TransportMessageHandler + Send + Sync>>>>,
 		entropy_source: ES,
 	) -> Self {
 		Self {
@@ -78,7 +78,7 @@ where
 	) -> Result<(), lightning::ln::msgs::LightningError> {
 		match request {
 			LSPS0Request::ListProtocols(_) => {
-				let message_handlers = self.message_handlers.lock().unwrap();
+				let message_handlers = self.message_handlers.read().unwrap();
 				let mut protocols = vec![];
 
 				for message_handler in message_handlers.values() {
@@ -133,6 +133,7 @@ where
 	fn handle_message(
 		&self, message: Self::ProtocolMessage, counterparty_node_id: &PublicKey,
 	) -> Result<(), lightning::ln::msgs::LightningError> {
+		log_info!(self.logger, "received transport protocol message: {:?}", message);
 		match message {
 			LSPS0Message::Request(request_id, request) => {
 				self.handle_request(request_id, request, counterparty_node_id)
@@ -177,13 +178,13 @@ mod tests {
 	fn test_handle_list_protocols_request() {
 		let logger = Arc::new(TestLogger {});
 		let entropy = Arc::new(TestEntropy {});
-		let message_handlers: Arc<Mutex<HashMap<Prefix, Arc<dyn TransportMessageHandler>>>> =
-			Arc::new(Mutex::new(HashMap::new()));
+		let message_handlers: Arc<RwLock<HashMap<Prefix, Arc<dyn TransportMessageHandler + Send + Sync>>>> =
+			Arc::new(RwLock::new(HashMap::new()));
 		let lsps0_handler =
 			Arc::new(LSPS0MessageHandler::new(logger, message_handlers.clone(), entropy));
 
 		{
-			let mut handlers = message_handlers.lock().unwrap();
+			let mut handlers = message_handlers.write().unwrap();
 			handlers.insert(Prefix::LSPS0, lsps0_handler.clone());
 		}
 
@@ -217,7 +218,7 @@ mod tests {
 	fn test_list_protocols() {
 		let lsps0_handler = Arc::new(LSPS0MessageHandler::new(
 			Arc::new(TestLogger {}),
-			Arc::new(Mutex::new(HashMap::new())),
+			Arc::new(RwLock::new(HashMap::new())),
 			Arc::new(TestEntropy {}),
 		));
 
@@ -247,7 +248,7 @@ mod tests {
 	fn test_handle_list_protocols_response() {
 		let lsps0_handler = Arc::new(LSPS0MessageHandler::new(
 			Arc::new(TestLogger {}),
-			Arc::new(Mutex::new(HashMap::new())),
+			Arc::new(RwLock::new(HashMap::new())),
 			Arc::new(TestEntropy {}),
 		));
 		let list_protocols_response = LSPS0Message::Response(

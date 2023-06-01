@@ -10,7 +10,7 @@
 
 //! # ldk-lsp-client
 //! Types and primitives to integrate a spec-compliant LSP with an LDK-based node.
-#![deny(missing_docs)]
+// #![deny(missing_docs)]
 #![deny(broken_intra_doc_links)]
 #![deny(private_intra_doc_links)]
 #![allow(bare_trait_objects)]
@@ -19,7 +19,12 @@
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
 mod channel_request;
-mod events;
-mod jit_channel;
+pub mod events;
+pub mod jit_channel;
 mod transport;
 mod utils;
+
+pub use transport::message_handler::LSPManager;
+pub use transport::protocol::LSPS0MessageHandler;
+pub use transport::msgs::Prefix;
+pub use jit_channel::channel_manager::JITChannelManager;

@@ -126,6 +126,17 @@ where
 	L::Target: Logger,
 	ES::Target: EntropySource,
 {
+	pub fn new(logger: L, entropy_source: ES, promise_secret: [u8;32]) -> Self {
+		Self {
+			logger,
+			entropy_source,
+			promise_secret,
+			pending_messages: Mutex::new(vec![]),
+			pending_events: Mutex::new(vec![]),
+			per_peer_state: RwLock::new(HashMap::new()),
+		}
+	}
+	
 	pub fn create_invoice(
 		&self, counterparty_node_id: PublicKey, payment_size_msat: Option<u64>,
 	) -> Result<(), APIError> {

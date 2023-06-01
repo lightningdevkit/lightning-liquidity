@@ -122,6 +122,20 @@ impl LSPSMessage {
 		deserializer.deserialize_any(visitor)
 	}
 
+	pub fn get_request_id_and_method(&self) -> Option<(String, String)> {
+		match self {
+			LSPSMessage::LSPS0(LSPS0Message::Request(request_id, request)) => {
+				Some((request_id.0.clone(), request.method().to_string()))
+			},
+			LSPSMessage::LSPS2(jit_channel::msgs::Message::Request(request_id,request)) => {
+				Some((request_id.0.clone(), request.method().to_string()))
+			},
+			_ => {
+				None
+			}
+		}
+	}
+
 	pub fn prefix(&self) -> Option<Prefix> {
 		match self {
 			LSPSMessage::Invalid => None,
@@ -443,6 +457,7 @@ mod tests {
 	            "protocols": [1,2,3]
 	        }
 	    }"#;
+
 		let mut request_id_to_method_map = HashMap::new();
 		request_id_to_method_map
 			.insert("request:id:xyz123".to_string(), "lsps0.listprotocols".to_string());

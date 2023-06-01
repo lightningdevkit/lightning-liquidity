@@ -5,11 +5,12 @@ use lightning::ln::peer_handler::CustomMessageHandler;
 use lightning::ln::wire::CustomMessageReader;
 use lightning::log_info;
 use lightning::util::logger::Logger;
+use lightning::util::ser::Readable;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::io;
 use std::ops::Deref;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 /// A trait used to implement a specific LSPS protocol
 /// The messages the protocol uses need to be able to be mapped
@@ -77,9 +78,9 @@ where
 	L::Target: Logger,
 {
 	logger: L,
-	pending_messages: Mutex<Vec<(PublicKey, RawLSPSMessage)>>,
-	request_id_to_method_map: Mutex<HashMap<String, String>>,
-	message_handlers: Arc<Mutex<HashMap<Prefix, Arc<dyn TransportMessageHandler>>>>,
+	pending_messages: Arc<Mutex<Vec<(PublicKey, RawLSPSMessage)>>>,
+	request_id_to_method_map: Arc<Mutex<HashMap<String, String>>>,
+	message_handlers: Arc<RwLock<HashMap<Prefix, Arc<dyn TransportMessageHandler + Send + Sync>>>>,
 }
 
 impl<L: Deref> LSPManager<L>
@@ -89,26 +90,26 @@ where
 	pub fn new(logger: L) -> Self {
 		Self {
 			logger,
-			pending_messages: Mutex::new(Vec::new()),
-			request_id_to_method_map: Mutex::new(HashMap::new()),
-			message_handlers: Arc::new(Mutex::new(HashMap::new())),
+			pending_messages: Arc::new(Mutex::new(Vec::new())),
+			request_id_to_method_map: Arc::new(Mutex::new(HashMap::new())),
+			message_handlers: Arc::new(RwLock::new(HashMap::new())),
 		}
 	}
 
 	pub fn get_message_handlers(
 		&self,
-	) -> Arc<Mutex<HashMap<Prefix, Arc<dyn TransportMessageHandler>>>> {
+	) -> Arc<RwLock<HashMap<Prefix, Arc<dyn TransportMessageHandler + Send + Sync>>>> {
 		self.message_handlers.clone()
 	}
 
 	pub fn register_message_handler(
-		&self, prefix: Prefix, message_handler: Arc<dyn TransportMessageHandler>,
+		&self, prefix: Prefix, message_handler: Arc<dyn TransportMessageHandler + Send + Sync>,
 	) {
-		self.message_handlers.lock().unwrap().insert(prefix, message_handler);
+		self.message_handlers.write().unwrap().insert(prefix, message_handler);
 	}
 
 	pub fn process_pending_events<H: EventHandler>(&self, handler: H) {
-		let message_handlers = self.message_handlers.lock().unwrap();
+		let message_handlers = self.message_handlers.read().unwrap();
 
 		for message_handler in message_handlers.values() {
 			let events = message_handler.get_and_clear_pending_events();
@@ -118,13 +119,29 @@ where
 		}
 	}
 
+	pub fn get_and_clear_pending_events(&self) -> Vec<Event> {
+		let mut events = vec![];
+
+		let message_handlers = self.message_handlers.read().unwrap();
+
+		for message_handler in message_handlers.values() {
+			let mut message_handler_events = message_handler.get_and_clear_pending_events();
+			events.append(&mut message_handler_events);
+		}
+
+		events
+	}
+
 	fn handle_lsps_message(
 		&self, msg: LSPSMessage, sender_node_id: &PublicKey,
 	) -> Result<(), lightning::ln::msgs::LightningError> {
+		log_info!(self.logger, "received lsps_message {:?}", msg);
 		if let Some(prefix) = msg.prefix() {
-			let message_handlers = self.message_handlers.lock().unwrap();
+			let message_handlers = self.message_handlers.read().unwrap();
+
 			// TODO: not sure what we are supposed to do when we receive a message we don't have a handler for
 			if let Some(message_handler) = message_handlers.get(&prefix) {
+				log_info!(self.logger, "found matching message handler, passing message to handler");
 				message_handler.handle_lsps_message(msg, sender_node_id)?;
 			} else {
 				log_info!(
@@ -155,9 +172,7 @@ where
 	) -> Result<Option<Self::CustomMessage>, lightning::ln::msgs::DecodeError> {
 		match message_type {
 			LSPS_MESSAGE_TYPE => {
-				let mut payload = String::new();
-				buffer.read_to_string(&mut payload)?;
-				Ok(Some(RawLSPSMessage { payload }))
+				Ok(Some(RawLSPSMessage::read(buffer)?))
 			}
 			_ => Ok(None),
 		}
@@ -175,7 +190,8 @@ where
 
 		match LSPSMessage::from_str_with_id_map(&msg.payload, &mut request_id_to_method_map) {
 			Ok(msg) => self.handle_lsps_message(msg, sender_node_id),
-			Err(_) => {
+			Err(e) => {
+				log_info!(self.logger, "Failed to deserialize message with error: {:?}", e);
 				self.enqueue_message(
 					*sender_node_id,
 					RawLSPSMessage {
@@ -197,12 +213,23 @@ where
 			);
 		}
 
-		let message_handlers = self.message_handlers.lock().unwrap();
+		let message_handlers = self.message_handlers.read().unwrap();
+		let mut request_id_method_names = vec![];
 		for message_handler in message_handlers.values() {
 			let protocol_messages = message_handler.get_and_clear_pending_msg();
 			msgs.extend(protocol_messages.into_iter().map(|(node_id, message)| {
+				if let Some((request_id, method_name)) = message.get_request_id_and_method() {
+					request_id_method_names.push((request_id, method_name));
+				}
 				(node_id, RawLSPSMessage { payload: serde_json::to_string(&message).unwrap() })
 			}));
+		}
+
+		{
+			let mut request_id_to_method_map = self.request_id_to_method_map.lock().unwrap();
+			for (request_id, method_name) in request_id_method_names.into_iter() {
+				request_id_to_method_map.insert(request_id, method_name);
+			}
 		}
 
 		msgs
