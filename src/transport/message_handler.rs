@@ -1,3 +1,4 @@
+use crate::events::{Event, EventQueue};
 use crate::transport::msgs::{LSPSMessage, RawLSPSMessage, LSPS_MESSAGE_TYPE};
 use crate::transport::protocol::LSPS0MessageHandler;
 
@@ -45,6 +46,7 @@ where
 	ES::Target: EntropySource,
 {
 	pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
+	pending_events: Arc<EventQueue>,
 	request_id_to_method_map: Mutex<HashMap<String, String>>,
 	lsps0_message_handler: LSPS0MessageHandler<ES>,
 	provider_config: Option<LiquidityProviderConfig>,
@@ -65,10 +67,25 @@ where
 
 		Self {
 			pending_messages,
+			pending_events: Arc::new(EventQueue::default()),
 			request_id_to_method_map: Mutex::new(HashMap::new()),
 			lsps0_message_handler,
 			provider_config,
 		}
+	}
+
+	/// Blocks until next event is ready and returns it
+	///
+	/// Typically you would spawn a thread or task that calls this in a loop
+	pub fn wait_next_event(&self) -> Event {
+		self.pending_events.wait_next_event()
+	}
+
+	/// Returns and clears all events without blocking
+	///
+	/// Typically you would spawn a thread or task that calls this in a loop
+	pub fn get_and_clear_pending_events(&self) -> Vec<Event> {
+		self.pending_events.get_and_clear_pending_events()
 	}
 
 	fn handle_lsps_message(
