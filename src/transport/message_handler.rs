@@ -3,12 +3,16 @@ use crate::transport::msgs::{LSPSMessage, RawLSPSMessage, LSPS_MESSAGE_TYPE};
 use crate::transport::protocol::LSPS0MessageHandler;
 
 use bitcoin::secp256k1::PublicKey;
+use lightning::chain;
+use lightning::chain::chaininterface::{BroadcasterInterface, FeeEstimator};
+use lightning::ln::channelmanager::ChannelManager;
 use lightning::ln::features::{InitFeatures, NodeFeatures};
 use lightning::ln::msgs::{ErrorAction, LightningError};
 use lightning::ln::peer_handler::CustomMessageHandler;
 use lightning::ln::wire::CustomMessageReader;
-use lightning::sign::EntropySource;
-use lightning::util::logger::Level;
+use lightning::routing::router::Router;
+use lightning::sign::{EntropySource, NodeSigner, SignerProvider};
+use lightning::util::logger::{Level, Logger};
 use lightning::util::ser::Readable;
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -41,25 +45,53 @@ pub struct LiquidityProviderConfig;
 ///
 /// Should be used as a [`CustomMessageHandler`] for your
 /// [`lightning::ln::peer_handler::PeerManager`]'s [`lightning::ln::peer_handler::MessageHandler`].
-pub struct LiquidityManager<ES: Deref>
-where
+pub struct LiquidityManager<
+	ES: Deref,
+	M: Deref,
+	T: Deref,
+	F: Deref,
+	R: Deref,
+	SP: Deref,
+	L: Deref,
+	NS: Deref,
+> where
 	ES::Target: EntropySource,
+	M::Target: chain::Watch<<SP::Target as SignerProvider>::Signer>,
+	T::Target: BroadcasterInterface,
+	F::Target: FeeEstimator,
+	R::Target: Router,
+	SP::Target: SignerProvider,
+	L::Target: Logger,
+	NS::Target: NodeSigner,
 {
 	pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
 	pending_events: Arc<EventQueue>,
 	request_id_to_method_map: Mutex<HashMap<String, String>>,
 	lsps0_message_handler: LSPS0MessageHandler<ES>,
 	provider_config: Option<LiquidityProviderConfig>,
+	channel_manager: Arc<ChannelManager<M, T, ES, NS, SP, F, R, L>>,
 }
 
-impl<ES: Deref> LiquidityManager<ES>
+impl<ES: Deref, M: Deref, T: Deref, F: Deref, R: Deref, SP: Deref, L: Deref, NS: Deref>
+	LiquidityManager<ES, M, T, F, R, SP, L, NS>
 where
 	ES::Target: EntropySource,
+	M::Target: chain::Watch<<SP::Target as SignerProvider>::Signer>,
+	T::Target: BroadcasterInterface,
+	F::Target: FeeEstimator,
+	R::Target: Router,
+	SP::Target: SignerProvider,
+	L::Target: Logger,
+	NS::Target: NodeSigner,
 {
 	/// Constructor for the LiquidityManager
 	///
 	/// Sets up the required protocol message handlers based on the given [`LiquidityProviderConfig`].
-	pub fn new(entropy_source: ES, provider_config: Option<LiquidityProviderConfig>) -> Self {
+	pub fn new(
+		entropy_source: ES, provider_config: Option<LiquidityProviderConfig>,
+		channel_manager: Arc<ChannelManager<M, T, ES, NS, SP, F, R, L>>,
+	) -> Self
+where {
 		let pending_messages = Arc::new(Mutex::new(vec![]));
 
 		let lsps0_message_handler =
@@ -71,6 +103,7 @@ where
 			request_id_to_method_map: Mutex::new(HashMap::new()),
 			lsps0_message_handler,
 			provider_config,
+			channel_manager,
 		}
 	}
 
@@ -108,14 +141,22 @@ where
 	}
 }
 
-impl<ES: Deref> CustomMessageReader for LiquidityManager<ES>
+impl<ES: Deref, M: Deref, T: Deref, F: Deref, R: Deref, SP: Deref, L: Deref, NS: Deref>
+	CustomMessageReader for LiquidityManager<ES, M, T, F, R, SP, L, NS>
 where
 	ES::Target: EntropySource,
+	M::Target: chain::Watch<<SP::Target as SignerProvider>::Signer>,
+	T::Target: BroadcasterInterface,
+	F::Target: FeeEstimator,
+	R::Target: Router,
+	SP::Target: SignerProvider,
+	L::Target: Logger,
+	NS::Target: NodeSigner,
 {
 	type CustomMessage = RawLSPSMessage;
 
-	fn read<R: io::Read>(
-		&self, message_type: u16, buffer: &mut R,
+	fn read<RD: io::Read>(
+		&self, message_type: u16, buffer: &mut RD,
 	) -> Result<Option<Self::CustomMessage>, lightning::ln::msgs::DecodeError> {
 		match message_type {
 			LSPS_MESSAGE_TYPE => Ok(Some(RawLSPSMessage::read(buffer)?)),
@@ -124,9 +165,17 @@ where
 	}
 }
 
-impl<ES: Deref> CustomMessageHandler for LiquidityManager<ES>
+impl<ES: Deref, M: Deref, T: Deref, F: Deref, R: Deref, SP: Deref, L: Deref, NS: Deref>
+	CustomMessageHandler for LiquidityManager<ES, M, T, F, R, SP, L, NS>
 where
 	ES::Target: EntropySource,
+	M::Target: chain::Watch<<SP::Target as SignerProvider>::Signer>,
+	T::Target: BroadcasterInterface,
+	F::Target: FeeEstimator,
+	R::Target: Router,
+	SP::Target: SignerProvider,
+	L::Target: Logger,
+	NS::Target: NodeSigner,
 {
 	fn handle_custom_message(
 		&self, msg: Self::CustomMessage, sender_node_id: &PublicKey,
