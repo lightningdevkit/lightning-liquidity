@@ -36,7 +36,7 @@ impl EventQueue {
 		let mut queue =
 			self.condvar.wait_while(self.queue.lock().unwrap(), |queue| queue.is_empty()).unwrap();
 
-		let event = queue.pop_front().expect("non empty queue");
+		let event = queue.pop_front().expect("non-empty queue");
 		let should_notify = !queue.is_empty();
 
 		drop(queue);
