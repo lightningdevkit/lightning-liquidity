@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use lightning::impl_writeable_msg;
 use lightning::ln::wire;
 use serde::de;

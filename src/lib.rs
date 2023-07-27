@@ -25,3 +25,4 @@ mod transport;
 mod utils;
 
 pub use transport::message_handler::{LiquidityManager, LiquidityProviderConfig};
+pub use transport::msgs;
