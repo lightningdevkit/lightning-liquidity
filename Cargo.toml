@@ -8,9 +8,9 @@ description = "Types and primitives to integrate a spec-compliant LSP with an LD
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-lightning = { git = "https://github.com/lightningdevkit/rust-lightning.git", rev = "498f2331459d8031031ef151a44c90d700aa8c7e", features = ["max_level_trace", "std"] }
-lightning-invoice = { git = "https://github.com/lightningdevkit/rust-lightning.git", rev = "498f2331459d8031031ef151a44c90d700aa8c7e" }
-lightning-net-tokio = { git = "https://github.com/lightningdevkit/rust-lightning.git", rev = "498f2331459d8031031ef151a44c90d700aa8c7e" }
+lightning = { version = "0.0.116", features = ["max_level_trace", "std"] }
+lightning-invoice = "0.24.0"
+lightning-net-tokio = "0.0.116"
 
 bitcoin = "0.29.0"
 
