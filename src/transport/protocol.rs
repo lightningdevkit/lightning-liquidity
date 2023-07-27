@@ -45,19 +45,21 @@ where
 		self.pending_messages.lock().unwrap().push((counterparty_node_id, message.into()));
 	}
 
-	fn handle_request(
+	/// Return LSPS0Response
+	///
+	/// Typically the return will not send out to any where just for verification or inspectation
+	/// in service for advanced features or logging
+	pub fn handle_request(
 		&self, request_id: RequestId, request: LSPS0Request, counterparty_node_id: &PublicKey,
-	) -> Result<(), lightning::ln::msgs::LightningError> {
+	) -> Result<LSPS0Response, lightning::ln::msgs::LightningError> {
 		match request {
 			LSPS0Request::ListProtocols(_) => {
-				let msg = LSPS0Message::Response(
-					request_id,
-					LSPS0Response::ListProtocols(ListProtocolsResponse {
-						protocols: self.protocols.clone(),
-					}),
-				);
+				let resp = LSPS0Response::ListProtocols(ListProtocolsResponse {
+					protocols: self.protocols.clone(),
+				});
+				let msg = LSPS0Message::Response(request_id, resp.clone());
 				self.enqueue_message(*counterparty_node_id, msg);
-				Ok(())
+				Ok(resp)
 			}
 		}
 	}
@@ -92,7 +94,8 @@ where
 	) -> Result<(), LightningError> {
 		match message {
 			LSPS0Message::Request(request_id, request) => {
-				self.handle_request(request_id, request, counterparty_node_id)
+				self.handle_request(request_id, request, counterparty_node_id)?;
+				Ok(())
 			}
 			LSPS0Message::Response(_, response) => {
 				self.handle_response(response, counterparty_node_id)

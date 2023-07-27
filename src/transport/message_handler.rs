@@ -67,7 +67,8 @@ pub struct LiquidityManager<
 	pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
 	pending_events: Arc<EventQueue>,
 	request_id_to_method_map: Mutex<HashMap<String, String>>,
-	lsps0_message_handler: LSPS0MessageHandler<ES>,
+	/// lsps0 message handler
+	pub lsps0_message_handler: LSPS0MessageHandler<ES>,
 	provider_config: Option<LiquidityProviderConfig>,
 	channel_manager: Arc<ChannelManager<M, T, ES, NS, SP, F, R, L>>,
 }
