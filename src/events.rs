@@ -13,6 +13,7 @@
 //! Because we don't have a built-in runtime, it's up to the end-user to poll
 //! [`crate::LiquidityManager::get_and_clear_pending_events()`] to receive events.
 
+use crate::transport::msgs::{LSPS0Response, RequestId};
 use std::collections::VecDeque;
 use std::sync::{Condvar, Mutex};
 
@@ -55,4 +56,16 @@ impl EventQueue {
 
 /// Event which you should probably take some action in response to.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Event {}
+pub struct Event {
+	/// The id from the request
+	pub id: RequestId,
+	/// The result of request
+	pub result: EventResult,
+}
+
+/// Content of the event
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EventResult {
+	/// The LSPS0 response
+	LSPS0(LSPS0Response),
+}

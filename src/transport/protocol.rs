@@ -5,6 +5,7 @@ use lightning::util::logger::Level;
 use std::ops::Deref;
 use std::sync::{Arc, Mutex};
 
+use crate::events::{Event, EventResult};
 use crate::transport::message_handler::ProtocolMessageHandler;
 use crate::transport::msgs::{
 	LSPS0Message, LSPS0Request, LSPS0Response, LSPSMessage, ListProtocolsRequest,
@@ -32,13 +33,14 @@ where
 		Self { entropy_source, protocols, pending_messages }
 	}
 
-	pub fn list_protocols(&self, counterparty_node_id: PublicKey) {
+	pub fn list_protocols(&self, counterparty_node_id: PublicKey) -> RequestId {
+		let request_id = utils::generate_request_id(&self.entropy_source);
 		let msg = LSPS0Message::Request(
-			utils::generate_request_id(&self.entropy_source),
+			request_id.clone(),
 			LSPS0Request::ListProtocols(ListProtocolsRequest {}),
 		);
-
 		self.enqueue_message(counterparty_node_id, msg);
+		request_id
 	}
 
 	fn enqueue_message(&self, counterparty_node_id: PublicKey, message: LSPS0Message) {
@@ -46,27 +48,25 @@ where
 	}
 
 	fn handle_request(
-		&self, request_id: RequestId, request: LSPS0Request, counterparty_node_id: &PublicKey,
-	) -> Result<(), lightning::ln::msgs::LightningError> {
+		&self, id: RequestId, request: LSPS0Request, counterparty_node_id: &PublicKey,
+	) -> Result<Option<Event>, lightning::ln::msgs::LightningError> {
 		match request {
 			LSPS0Request::ListProtocols(_) => {
-				let msg = LSPS0Message::Response(
-					request_id,
-					LSPS0Response::ListProtocols(ListProtocolsResponse {
-						protocols: self.protocols.clone(),
-					}),
-				);
+				let response = LSPS0Response::ListProtocols(ListProtocolsResponse {
+					protocols: self.protocols.clone(),
+				});
+				let msg = LSPS0Message::Response(id.clone(), response.clone());
 				self.enqueue_message(*counterparty_node_id, msg);
-				Ok(())
+				Ok(Some(Event { id, result: EventResult::LSPS0(response) }))
 			}
 		}
 	}
 
 	fn handle_response(
 		&self, response: LSPS0Response, counterparty_node_id: &PublicKey,
-	) -> Result<(), LightningError> {
+	) -> Result<Option<Event>, LightningError> {
 		match response {
-			LSPS0Response::ListProtocols(ListProtocolsResponse { protocols }) => Ok(()),
+			LSPS0Response::ListProtocols(ListProtocolsResponse { protocols }) => Ok(None),
 			LSPS0Response::ListProtocolsError(ResponseError { code, message, data, .. }) => {
 				Err(LightningError {
 					err: format!(
@@ -89,7 +89,7 @@ where
 
 	fn handle_message(
 		&self, message: Self::ProtocolMessage, counterparty_node_id: &PublicKey,
-	) -> Result<(), LightningError> {
+	) -> Result<Option<Event>, LightningError> {
 		match message {
 			LSPS0Message::Request(request_id, request) => {
 				self.handle_request(request_id, request, counterparty_node_id)

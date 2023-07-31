@@ -1,5 +1,5 @@
-use crate::events::{Event, EventQueue};
-use crate::transport::msgs::{LSPSMessage, RawLSPSMessage, LSPS_MESSAGE_TYPE};
+use crate::events::{Event, EventQueue, EventResult};
+use crate::transport::msgs::{LSPSMessage, RawLSPSMessage, RequestId, LSPS_MESSAGE_TYPE};
 use crate::transport::protocol::LSPS0MessageHandler;
 
 use bitcoin::secp256k1::PublicKey;
@@ -32,7 +32,7 @@ pub(crate) trait ProtocolMessageHandler {
 
 	fn handle_message(
 		&self, message: Self::ProtocolMessage, counterparty_node_id: &PublicKey,
-	) -> Result<(), LightningError>;
+	) -> Result<Option<Event>, LightningError>;
 }
 
 /// A configuration for [`LiquidityManager`].
@@ -121,6 +121,25 @@ where {
 		self.pending_events.get_and_clear_pending_events()
 	}
 
+	/// Returns the waiting event result and close
+	pub fn wait_event_result(self, request_id: RequestId) -> EventResult {
+		loop {
+			let events = self.pending_events.get_and_clear_pending_events();
+			for Event { id, result } in events {
+				if id == request_id {
+					return result;
+				}
+			}
+		}
+	}
+
+	/// This allows the list the protocols of LSPS0
+	pub fn list_protocols(
+		&self, counterparty_node_id: PublicKey,
+	) -> Result<RequestId, lightning::ln::msgs::LightningError> {
+		Ok(self.lsps0_message_handler.list_protocols(counterparty_node_id))
+	}
+
 	fn handle_lsps_message(
 		&self, msg: LSPSMessage, sender_node_id: &PublicKey,
 	) -> Result<(), lightning::ln::msgs::LightningError> {
@@ -129,7 +148,11 @@ where {
 				return Err(LightningError { err: format!("{} did not understand a message we previously sent, maybe they don't support a protocol we are trying to use?", sender_node_id), action: ErrorAction::IgnoreAndLog(Level::Error)});
 			}
 			LSPSMessage::LSPS0(msg) => {
-				self.lsps0_message_handler.handle_message(msg, sender_node_id)?;
+				if let Some(event) =
+					self.lsps0_message_handler.handle_message(msg, sender_node_id)?
+				{
+					self.pending_events.enqueue(event);
+				}
 			}
 		}
 		Ok(())
