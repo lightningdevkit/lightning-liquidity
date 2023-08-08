@@ -23,10 +23,13 @@ const JSONRPC_INVALID_MESSAGE_ERROR_MESSAGE: &str = "parse error";
 
 const LSPS0_LISTPROTOCOLS_METHOD_NAME: &str = "lsps0.listprotocols";
 
-pub const LSPS_MESSAGE_TYPE: u16 = 37913;
+/// The lightning message type id for lsps messages
+pub const LSPS_MESSAGE_TYPE_ID: u16 = 37913;
 
+/// Lightning message type used by LSPS protocols
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RawLSPSMessage {
+	/// The raw string payload that holds the actual message
 	pub payload: String,
 }
 
@@ -34,7 +37,7 @@ impl_writeable_msg!(RawLSPSMessage, { payload }, {});
 
 impl wire::Type for RawLSPSMessage {
 	fn type_id(&self) -> u16 {
-		LSPS_MESSAGE_TYPE
+		LSPS_MESSAGE_TYPE_ID
 	}
 }
 

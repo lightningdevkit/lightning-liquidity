@@ -98,10 +98,14 @@ impl OpeningFeeParams {
 	}
 }
 
+/// Information about the parameters a LSP is willing to offer clients
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct GetInfoResponse {
+	/// A set of opening fee parameters.
 	pub opening_fee_params_menu: Vec<OpeningFeeParams>,
+	/// The minimum payment size required to open a channel.
 	pub min_payment_size_msat: u64,
+	/// The maximum payment size the lsp will tolerate.
 	pub max_payment_size_msat: u64,
 }
 
@@ -113,10 +117,16 @@ pub struct BuyRequest {
 	pub payment_size_msat: Option<u64>,
 }
 
+/// A response from a buy request made by a client
+/// 
+/// Includes information needed to construct an invoice.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct BuyResponse {
+	/// The short channel id used by LSP to identify need to open channel.
 	pub jit_channel_scid: String,
+	/// The locktime expiry delta the lsp requires.
 	pub lsp_cltv_expiry_delta: u32,
+	/// A flag that indicates who is trusting who.
 	#[serde(default)]
 	pub client_trusts_lsp: bool,
 }

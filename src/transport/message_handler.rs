@@ -1,7 +1,7 @@
 use crate::events::{Event, EventQueue};
 use crate::jit_channel::channel_manager::JITChannelManager;
 use crate::jit_channel::msgs::{OpeningFeeParams, RawOpeningFeeParams};
-use crate::transport::msgs::{LSPSMessage, RawLSPSMessage, LSPS_MESSAGE_TYPE};
+use crate::transport::msgs::{LSPSMessage, RawLSPSMessage, LSPS_MESSAGE_TYPE_ID};
 use crate::transport::protocol::LSPS0MessageHandler;
 
 use bitcoin::secp256k1::PublicKey;
@@ -88,6 +88,7 @@ pub struct LiquidityManager<
 	RM: Deref,
 	CM: Deref,
 	OM: Deref,
+	CMH: Deref,
 	NS: Deref,
 > where
 	ES::Target: EntropySource,
@@ -100,6 +101,7 @@ pub struct LiquidityManager<
 	RM::Target: RoutingMessageHandler,
 	CM::Target: ChannelMessageHandler,
 	OM::Target: OnionMessageHandler,
+	CMH::Target: CustomMessageHandler,
 	NS::Target: NodeSigner,
 {
 	pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
@@ -107,7 +109,7 @@ pub struct LiquidityManager<
 	request_id_to_method_map: Mutex<HashMap<String, String>>,
 	lsps0_message_handler: LSPS0MessageHandler<ES>,
 	lsps2_message_handler:
-		Option<JITChannelManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, Arc<Self>, NS>>,
+		Option<JITChannelManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, CMH, NS>>,
 	provider_config: Option<LiquidityProviderConfig>,
 	channel_manager: Arc<ChannelManager<M, T, ES, NS, SP, F, R, L>>,
 }
@@ -124,8 +126,9 @@ impl<
 		RM: Deref,
 		CM: Deref,
 		OM: Deref,
+		CMH: Deref,
 		NS: Deref,
-	> LiquidityManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, NS>
+	> LiquidityManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, CMH, NS>
 where
 	ES::Target: EntropySource,
 	M::Target: chain::Watch<<SP::Target as SignerProvider>::Signer>,
@@ -137,6 +140,7 @@ where
 	RM::Target: RoutingMessageHandler,
 	CM::Target: ChannelMessageHandler,
 	OM::Target: OnionMessageHandler,
+	CMH::Target: CustomMessageHandler,
 	NS::Target: NodeSigner,
 {
 	/// Constructor for the [`LiquidityManager`]
@@ -145,8 +149,7 @@ where
 	pub fn new(
 		entropy_source: ES, provider_config: Option<LiquidityProviderConfig>,
 		channel_manager: Arc<ChannelManager<M, T, ES, NS, SP, F, R, L>>,
-	) -> Self
-where {
+	) -> Self {
 		let pending_messages = Arc::new(Mutex::new(vec![]));
 		let pending_events = Arc::new(EventQueue::default());
 
@@ -197,8 +200,8 @@ where {
 	///
 	/// Without this the messages will be sent based on whatever polling interval
 	/// your background processor uses.
-	pub fn set_peer_manager(
-		&self, peer_manager: Arc<PeerManager<Descriptor, CM, RM, OM, L, Arc<Self>, NS>>,
+	pub fn set_peer_manager (
+		&self, peer_manager: Arc<PeerManager<Descriptor, CM, RM, OM, L, CMH, NS>>,
 	) {
 		if let Some(lsps2_message_handler) = &self.lsps2_message_handler {
 			lsps2_message_handler.set_peer_manager(peer_manager);
@@ -389,8 +392,9 @@ impl<
 		RM: Deref,
 		CM: Deref,
 		OM: Deref,
+		CMH: Deref,
 		NS: Deref,
-	> CustomMessageReader for LiquidityManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, NS>
+	> CustomMessageReader for LiquidityManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, CMH, NS>
 where
 	ES::Target: EntropySource,
 	L::Target: Logger,
@@ -402,15 +406,16 @@ where
 	RM::Target: RoutingMessageHandler,
 	CM::Target: ChannelMessageHandler,
 	OM::Target: OnionMessageHandler,
+	CMH::Target: CustomMessageHandler,
 	NS::Target: NodeSigner,
 {
 	type CustomMessage = RawLSPSMessage;
 
-	fn read<RD: io::Read>(
+	fn read<RD: lightning::io::Read>(
 		&self, message_type: u16, buffer: &mut RD,
 	) -> Result<Option<Self::CustomMessage>, lightning::ln::msgs::DecodeError> {
 		match message_type {
-			LSPS_MESSAGE_TYPE => Ok(Some(RawLSPSMessage::read(buffer)?)),
+			LSPS_MESSAGE_TYPE_ID => Ok(Some(RawLSPSMessage::read(buffer)?)),
 			_ => Ok(None),
 		}
 	}
@@ -428,8 +433,9 @@ impl<
 		RM: Deref,
 		CM: Deref,
 		OM: Deref,
+		CMH: Deref,
 		NS: Deref,
-	> CustomMessageHandler for LiquidityManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, NS>
+	> CustomMessageHandler for LiquidityManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, CMH, NS>
 where
 	ES::Target: EntropySource,
 	M::Target: chain::Watch<<SP::Target as SignerProvider>::Signer>,
@@ -441,6 +447,7 @@ where
 	RM::Target: RoutingMessageHandler,
 	CM::Target: ChannelMessageHandler,
 	OM::Target: OnionMessageHandler,
+	CMH::Target: CustomMessageHandler,
 	NS::Target: NodeSigner,
 {
 	fn handle_custom_message(
