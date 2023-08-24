@@ -20,8 +20,7 @@ const JSONRPC_RESULT_FIELD_KEY: &str = "result";
 const JSONRPC_ERROR_FIELD_KEY: &str = "error";
 const JSONRPC_INVALID_MESSAGE_ERROR_CODE: i32 = -32700;
 const JSONRPC_INVALID_MESSAGE_ERROR_MESSAGE: &str = "parse error";
-
-const LSPS0_LISTPROTOCOLS_METHOD_NAME: &str = "lsps0.listprotocols";
+const LSPS0_LISTPROTOCOLS_METHOD_NAME: &str = "lsps0.list_protocols";
 
 /// The lightning message type id for lsps messages
 pub const LSPS_MESSAGE_TYPE_ID: u16 = 37913;
@@ -74,7 +73,7 @@ pub enum LSPS0Request {
 impl LSPS0Request {
 	pub fn method(&self) -> &str {
 		match self {
-			LSPS0Request::ListProtocols(_) => "lsps0.listprotocols",
+			LSPS0Request::ListProtocols(_) => LSPS0_LISTPROTOCOLS_METHOD_NAME,
 		}
 	}
 }
@@ -401,7 +400,7 @@ mod tests {
 		let json = r#"{
 			"jsonrpc": "2.0",
 			"id": "request:id:xyz123",
-			"method": "lsps0.listprotocols"
+			"method": "lsps0.list_protocols"
 		}"#;
 
 		let mut request_id_method_map = HashMap::new();
@@ -427,7 +426,7 @@ mod tests {
 		let json = serde_json::to_string(&request).unwrap();
 		assert_eq!(
 			json,
-			r#"{"jsonrpc":"2.0","method":"lsps0.listprotocols","id":"request:id:xyz123","params":{}}"#
+			r#"{"jsonrpc":"2.0","method":"lsps0.list_protocols","id":"request:id:xyz123","params":{}}"#
 		);
 	}
 
@@ -442,7 +441,7 @@ mod tests {
 	    }"#;
 		let mut request_id_to_method_map = HashMap::new();
 		request_id_to_method_map
-			.insert("request:id:xyz123".to_string(), "lsps0.listprotocols".to_string());
+			.insert("request:id:xyz123".to_string(), "lsps0.list_protocols".to_string());
 
 		let response =
 			LSPSMessage::from_str_with_id_map(json, &mut request_id_to_method_map).unwrap();
@@ -468,7 +467,7 @@ mod tests {
 	    }"#;
 		let mut request_id_to_method_map = HashMap::new();
 		request_id_to_method_map
-			.insert("request:id:xyz123".to_string(), "lsps0.listprotocols".to_string());
+			.insert("request:id:xyz123".to_string(), "lsps0.list_protocols".to_string());
 
 		let response =
 			LSPSMessage::from_str_with_id_map(json, &mut request_id_to_method_map).unwrap();
@@ -497,7 +496,7 @@ mod tests {
 	    }"#;
 		let mut request_id_to_method_map = HashMap::new();
 		request_id_to_method_map
-			.insert("request:id:xyz123".to_string(), "lsps0.listprotocols".to_string());
+			.insert("request:id:xyz123".to_string(), "lsps0.list_protocols".to_string());
 
 		let response = LSPSMessage::from_str_with_id_map(json, &mut request_id_to_method_map);
 		assert!(response.is_err());

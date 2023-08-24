@@ -4,11 +4,10 @@ use crate::jit_channel::msgs::{OpeningFeeParams, RawOpeningFeeParams};
 use crate::transport::msgs::{LSPSMessage, RawLSPSMessage, LSPS_MESSAGE_TYPE_ID};
 use crate::transport::protocol::LSPS0MessageHandler;
 
-use bitcoin::secp256k1::PublicKey;
-use lightning::chain;
 use lightning::chain::chaininterface::{BroadcasterInterface, FeeEstimator};
-use lightning::ln::channelmanager::ChannelManager;
 use lightning::ln::channelmanager::InterceptId;
+use lightning::chain::{self, BestBlock, Confirm, Filter, Listen};
+use lightning::ln::channelmanager::{ChainParameters, ChannelManager};
 use lightning::ln::features::{InitFeatures, NodeFeatures};
 use lightning::ln::msgs::{
 	ChannelMessageHandler, ErrorAction, LightningError, OnionMessageHandler, RoutingMessageHandler,
@@ -20,11 +19,16 @@ use lightning::sign::{EntropySource, NodeSigner, SignerProvider};
 use lightning::util::errors::APIError;
 use lightning::util::logger::{Level, Logger};
 use lightning::util::ser::Readable;
+
+use bitcoin::blockdata::constants::genesis_block;
+use bitcoin::secp256k1::PublicKey;
+use bitcoin::BlockHash;
+
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::io;
 use std::ops::Deref;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use super::msgs::RequestId;
 
@@ -90,6 +94,7 @@ pub struct LiquidityManager<
 	OM: Deref,
 	CMH: Deref,
 	NS: Deref,
+	C: Deref,
 > where
 	ES::Target: EntropySource,
 	M::Target: chain::Watch<<SP::Target as SignerProvider>::Signer>,
@@ -103,6 +108,7 @@ pub struct LiquidityManager<
 	OM::Target: OnionMessageHandler,
 	CMH::Target: CustomMessageHandler,
 	NS::Target: NodeSigner,
+	C::Target: Filter,
 {
 	pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
 	pending_events: Arc<EventQueue>,
@@ -112,6 +118,9 @@ pub struct LiquidityManager<
 		Option<JITChannelManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, CMH, NS>>,
 	provider_config: Option<LiquidityProviderConfig>,
 	channel_manager: Arc<ChannelManager<M, T, ES, NS, SP, F, R, L>>,
+	chain_source: Option<C>,
+	genesis_hash: BlockHash,
+	best_block: RwLock<BestBlock>,
 }
 
 impl<
@@ -128,7 +137,8 @@ impl<
 		OM: Deref,
 		CMH: Deref,
 		NS: Deref,
-	> LiquidityManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, CMH, NS>
+		C: Deref,
+	> LiquidityManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, CMH, NS, C>
 where
 	ES::Target: EntropySource,
 	M::Target: chain::Watch<<SP::Target as SignerProvider>::Signer>,
@@ -142,14 +152,17 @@ where
 	OM::Target: OnionMessageHandler,
 	CMH::Target: CustomMessageHandler,
 	NS::Target: NodeSigner,
+	C::Target: Filter,
 {
 	/// Constructor for the [`LiquidityManager`]
 	///
 	/// Sets up the required protocol message handlers based on the given [`LiquidityProviderConfig`].
 	pub fn new(
 		entropy_source: ES, provider_config: Option<LiquidityProviderConfig>,
-		channel_manager: Arc<ChannelManager<M, T, ES, NS, SP, F, R, L>>,
-	) -> Self {
+		channel_manager: Arc<ChannelManager<M, T, ES, NS, SP, F, R, L>>, chain_source: Option<C>,
+		chain_params: ChainParameters,
+	) -> Self
+where {
 		let pending_messages = Arc::new(Mutex::new(vec![]));
 		let pending_events = Arc::new(EventQueue::default());
 
@@ -176,6 +189,9 @@ where
 			provider_config,
 			channel_manager,
 			lsps2_message_handler,
+			chain_source,
+			genesis_hash: genesis_block(chain_params.network).header.block_hash(),
+			best_block: RwLock::new(chain_params.best_block),
 		}
 	}
 
@@ -394,7 +410,8 @@ impl<
 		OM: Deref,
 		CMH: Deref,
 		NS: Deref,
-	> CustomMessageReader for LiquidityManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, CMH, NS>
+		C: Deref,
+	> CustomMessageReader for LiquidityManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, CMH, NS, C>
 where
 	ES::Target: EntropySource,
 	L::Target: Logger,
@@ -408,6 +425,7 @@ where
 	OM::Target: OnionMessageHandler,
 	CMH::Target: CustomMessageHandler,
 	NS::Target: NodeSigner,
+	C::Target: Filter,
 {
 	type CustomMessage = RawLSPSMessage;
 
@@ -435,7 +453,8 @@ impl<
 		OM: Deref,
 		CMH: Deref,
 		NS: Deref,
-	> CustomMessageHandler for LiquidityManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, CMH, NS>
+		C: Deref,
+	> CustomMessageHandler for LiquidityManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, CMH, NS, C>
 where
 	ES::Target: EntropySource,
 	M::Target: chain::Watch<<SP::Target as SignerProvider>::Signer>,
@@ -449,6 +468,7 @@ where
 	OM::Target: OnionMessageHandler,
 	CMH::Target: CustomMessageHandler,
 	NS::Target: NodeSigner,
+	C::Target: Filter,
 {
 	fn handle_custom_message(
 		&self, msg: Self::CustomMessage, sender_node_id: &PublicKey,
@@ -503,5 +523,123 @@ where
 		}
 
 		features
+	}
+}
+
+impl<
+		ES: Deref + Clone,
+		M: Deref,
+		T: Deref,
+		F: Deref,
+		R: Deref,
+		SP: Deref,
+		Descriptor: SocketDescriptor,
+		L: Deref,
+		RM: Deref,
+		CM: Deref,
+		OM: Deref,
+		CMH: Deref,
+		NS: Deref,
+		C: Deref,
+	> Listen for LiquidityManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, CMH, NS, C>
+where
+	ES::Target: EntropySource,
+	M::Target: chain::Watch<<SP::Target as SignerProvider>::Signer>,
+	T::Target: BroadcasterInterface,
+	F::Target: FeeEstimator,
+	R::Target: Router,
+	SP::Target: SignerProvider,
+	L::Target: Logger,
+	RM::Target: RoutingMessageHandler,
+	CM::Target: ChannelMessageHandler,
+	OM::Target: OnionMessageHandler,
+	CMH::Target: CustomMessageHandler,
+	NS::Target: NodeSigner,
+	C::Target: Filter,
+{
+	fn filtered_block_connected(
+		&self, header: &bitcoin::BlockHeader, txdata: &chain::transaction::TransactionData,
+		height: u32,
+	) {
+		{
+			let best_block = self.best_block.read().unwrap();
+			assert_eq!(best_block.block_hash(), header.prev_blockhash,
+			"Blocks must be connected in chain-order - the connected header must build on the last connected header");
+			assert_eq!(best_block.height(), height - 1,
+			"Blocks must be connected in chain-order - the connected block height must be one greater than the previous height");
+		}
+
+		self.transactions_confirmed(header, txdata, height);
+		self.best_block_updated(header, height);
+	}
+
+	fn block_disconnected(&self, header: &bitcoin::BlockHeader, height: u32) {
+		let new_height = height - 1;
+		{
+			let mut best_block = self.best_block.write().unwrap();
+			assert_eq!(best_block.block_hash(), header.block_hash(),
+				"Blocks must be disconnected in chain-order - the disconnected header must be the last connected header");
+			assert_eq!(best_block.height(), height,
+				"Blocks must be disconnected in chain-order - the disconnected block must have the correct height");
+			*best_block = BestBlock::new(header.prev_blockhash, new_height)
+		}
+
+		// TODO: Call block_disconnected on all sub-modules that require it, e.g., CRManager.
+		// Internally this should call transaction_unconfirmed for all transactions that were
+		// confirmed at a height <= the one we now disconnected.
+	}
+}
+
+impl<
+		ES: Deref + Clone,
+		M: Deref,
+		T: Deref,
+		F: Deref,
+		R: Deref,
+		SP: Deref,
+		Descriptor: SocketDescriptor,
+		L: Deref,
+		RM: Deref,
+		CM: Deref,
+		OM: Deref,
+		CMH: Deref,
+		NS: Deref,
+		C: Deref,
+	> Confirm for LiquidityManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, CMH, NS, C>
+where
+	ES::Target: EntropySource,
+	M::Target: chain::Watch<<SP::Target as SignerProvider>::Signer>,
+	T::Target: BroadcasterInterface,
+	F::Target: FeeEstimator,
+	R::Target: Router,
+	SP::Target: SignerProvider,
+	L::Target: Logger,
+	RM::Target: RoutingMessageHandler,
+	CM::Target: ChannelMessageHandler,
+	OM::Target: OnionMessageHandler,
+	CMH::Target: CustomMessageHandler,
+	NS::Target: NodeSigner,
+	C::Target: Filter,
+{
+	fn transactions_confirmed(
+		&self, header: &bitcoin::BlockHeader, txdata: &chain::transaction::TransactionData,
+		height: u32,
+	) {
+		// TODO: Call transactions_confirmed on all sub-modules that require it, e.g., CRManager.
+	}
+
+	fn transaction_unconfirmed(&self, txid: &bitcoin::Txid) {
+		// TODO: Call transaction_unconfirmed on all sub-modules that require it, e.g., CRManager.
+		// Internally this should call transaction_unconfirmed for all transactions that were
+		// confirmed at a height <= the one we now unconfirmed.
+	}
+
+	fn best_block_updated(&self, header: &bitcoin::BlockHeader, height: u32) {
+		// TODO: Call best_block_updated on all sub-modules that require it, e.g., CRManager.
+	}
+
+	fn get_relevant_txids(&self) -> Vec<(bitcoin::Txid, Option<bitcoin::BlockHash>)> {
+		// TODO: Collect relevant txids from all sub-modules that, e.g., CRManager.
+		Vec::new()
 	}
 }
