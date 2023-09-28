@@ -5,8 +5,8 @@ use crate::transport::msgs::{LSPSMessage, RawLSPSMessage, LSPS_MESSAGE_TYPE_ID};
 use crate::transport::protocol::LSPS0MessageHandler;
 
 use lightning::chain::chaininterface::{BroadcasterInterface, FeeEstimator};
-use lightning::ln::channelmanager::InterceptId;
 use lightning::chain::{self, BestBlock, Confirm, Filter, Listen};
+use lightning::ln::channelmanager::InterceptId;
 use lightning::ln::channelmanager::{ChainParameters, ChannelManager};
 use lightning::ln::features::{InitFeatures, NodeFeatures};
 use lightning::ln::msgs::{
@@ -14,6 +14,7 @@ use lightning::ln::msgs::{
 };
 use lightning::ln::peer_handler::{CustomMessageHandler, PeerManager, SocketDescriptor};
 use lightning::ln::wire::CustomMessageReader;
+use lightning::ln::ChannelId;
 use lightning::routing::router::Router;
 use lightning::sign::{EntropySource, NodeSigner, SignerProvider};
 use lightning::util::errors::APIError;
@@ -216,7 +217,7 @@ where {
 	///
 	/// Without this the messages will be sent based on whatever polling interval
 	/// your background processor uses.
-	pub fn set_peer_manager (
+	pub fn set_peer_manager(
 		&self, peer_manager: Arc<PeerManager<Descriptor, CM, RM, OM, L, CMH, NS>>,
 	) {
 		if let Some(lsps2_message_handler) = &self.lsps2_message_handler {
@@ -355,7 +356,7 @@ where {
 	/// Will forward the intercepted HTLC if it matches a channel
 	/// we need to forward a payment over otherwise it will be ignored.
 	pub fn channel_ready(
-		&self, user_channel_id: u128, channel_id: &[u8; 32], counterparty_node_id: &PublicKey,
+		&self, user_channel_id: u128, channel_id: &ChannelId, counterparty_node_id: &PublicKey,
 	) -> Result<(), APIError> {
 		if let Some(lsps2_message_handler) = &self.lsps2_message_handler {
 			lsps2_message_handler.channel_ready(
@@ -411,7 +412,8 @@ impl<
 		CMH: Deref,
 		NS: Deref,
 		C: Deref,
-	> CustomMessageReader for LiquidityManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, CMH, NS, C>
+	> CustomMessageReader
+	for LiquidityManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, CMH, NS, C>
 where
 	ES::Target: EntropySource,
 	L::Target: Logger,
@@ -454,7 +456,8 @@ impl<
 		CMH: Deref,
 		NS: Deref,
 		C: Deref,
-	> CustomMessageHandler for LiquidityManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, CMH, NS, C>
+	> CustomMessageHandler
+	for LiquidityManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, CMH, NS, C>
 where
 	ES::Target: EntropySource,
 	M::Target: chain::Watch<<SP::Target as SignerProvider>::Signer>,

@@ -79,12 +79,6 @@ pub enum Event {
 		scid: u64,
 		/// The cltv_expiry_delta to use in the route hint.
 		cltv_expiry_delta: u32,
-		/// The agreed upon channel parameters.
-		fees: OpeningFeeParams,
-		/// The min payment size allowed.
-		min_payment_size_msat: Option<u64>,
-		/// The max payment size allowed.
-		max_payment_size_msat: Option<u64>,
 		/// The initial payment size you specified.
 		payment_size_msat: Option<u64>,
 		/// The trust model the lsp expects.

@@ -19,10 +19,8 @@ use lightning::ln::channelmanager::{ChannelManager, InterceptId};
 use lightning::ln::msgs::{
 	ChannelMessageHandler, ErrorAction, LightningError, OnionMessageHandler, RoutingMessageHandler,
 };
-use lightning::ln::peer_handler::{
-	APeerManager, CustomMessageHandler, PeerManager, SocketDescriptor,
-};
-use lightning::routing::gossip::NetworkGraph;
+use lightning::ln::peer_handler::{CustomMessageHandler, PeerManager, SocketDescriptor};
+use lightning::ln::ChannelId;
 use lightning::routing::router::Router;
 use lightning::sign::{EntropySource, NodeSigner, SignerProvider};
 use lightning::util::errors::APIError;
@@ -43,86 +41,283 @@ use super::msgs::{
 
 const SUPPORTED_SPEC_VERSION: u16 = 1;
 
-#[derive(PartialEq)]
-enum JITChannelState {
+struct ChannelStateError(String);
+
+impl From<ChannelStateError> for LightningError {
+	fn from(value: ChannelStateError) -> Self {
+		LightningError { err: value.0, action: ErrorAction::IgnoreAndLog(Level::Info) }
+	}
+}
+
+struct InboundJITChannelConfig {
+	pub user_id: u128,
+	pub token: Option<String>,
+	pub payment_size_msat: Option<u64>,
+}
+
+#[derive(PartialEq, Debug)]
+enum InboundJITChannelState {
 	VersionsRequested,
 	MenuRequested,
 	PendingMenuSelection,
 	BuyRequested,
 	PendingPayment,
-	Ready,
 }
 
-struct JITChannel {
+impl InboundJITChannelState {
+	fn versions_received(&self, versions: Vec<u16>) -> Result<Self, ChannelStateError> {
+		if !versions.contains(&SUPPORTED_SPEC_VERSION) {
+			return Err(ChannelStateError(format!(
+				"LSP does not support our specification version.  ours = {}. theirs = {:?}",
+				SUPPORTED_SPEC_VERSION, versions
+			)));
+		}
+
+		match self {
+			InboundJITChannelState::VersionsRequested => Ok(InboundJITChannelState::MenuRequested),
+			state => Err(ChannelStateError(format!(
+				"Received unexpected get_versions response. JIT Channel was in state: {:?}",
+				state
+			))),
+		}
+	}
+
+	fn info_received(&self) -> Result<Self, ChannelStateError> {
+		match self {
+			InboundJITChannelState::MenuRequested => {
+				Ok(InboundJITChannelState::PendingMenuSelection)
+			}
+			state => Err(ChannelStateError(format!(
+				"Received unexpected get_info response.  JIT Channel was in state: {:?}",
+				state
+			))),
+		}
+	}
+
+	fn opening_fee_params_selected(&self) -> Result<Self, ChannelStateError> {
+		match self {
+			InboundJITChannelState::PendingMenuSelection => {
+				Ok(InboundJITChannelState::BuyRequested)
+			}
+			state => Err(ChannelStateError(format!(
+				"Opening fee params selected when JIT Channel was in state: {:?}",
+				state
+			))),
+		}
+	}
+
+	fn invoice_params_received(&self) -> Result<Self, ChannelStateError> {
+		match self {
+			InboundJITChannelState::BuyRequested => Ok(InboundJITChannelState::PendingPayment),
+			state => Err(ChannelStateError(format!(
+				"Invoice params received when JIT Channel was in state: {:?}",
+				state
+			))),
+		}
+	}
+}
+
+struct InboundJITChannel {
 	id: u128,
-	user_id: u128,
-	state: JITChannelState,
-	fees: Option<OpeningFeeParams>,
-	token: Option<String>,
-	min_payment_size_msat: Option<u64>,
-	max_payment_size_msat: Option<u64>,
-	payment_size_msat: Option<u64>,
-	counterparty_node_id: PublicKey,
-	amt_to_forward_msat: Option<u64>,
-	intercept_id: Option<InterceptId>,
-	scid: Option<u64>,
-	lsp_cltv_expiry_delta: Option<u32>,
+	state: InboundJITChannelState,
+	config: InboundJITChannelConfig,
 }
 
-impl JITChannel {
+impl InboundJITChannel {
 	pub fn new(
-		id: u128, counterparty_node_id: PublicKey, user_id: u128, payment_size_msat: Option<u64>,
-		token: Option<String>,
+		id: u128, user_id: u128, payment_size_msat: Option<u64>, token: Option<String>,
 	) -> Self {
 		Self {
 			id,
-			counterparty_node_id,
-			token,
-			user_id,
-			state: JITChannelState::VersionsRequested,
-			fees: None,
-			min_payment_size_msat: None,
-			max_payment_size_msat: None,
+			config: InboundJITChannelConfig { user_id, payment_size_msat, token },
+			state: InboundJITChannelState::VersionsRequested,
+		}
+	}
+
+	pub fn versions_received(&mut self, versions: Vec<u16>) -> Result<(), LightningError> {
+		self.state = self.state.versions_received(versions)?;
+		Ok(())
+	}
+
+	pub fn info_received(&mut self) -> Result<(), LightningError> {
+		self.state = self.state.info_received()?;
+		Ok(())
+	}
+
+	pub fn opening_fee_params_selected(&mut self) -> Result<(), LightningError> {
+		self.state = self.state.opening_fee_params_selected()?;
+		Ok(())
+	}
+
+	pub fn invoice_params_received(&mut self) -> Result<(), LightningError> {
+		self.state = self.state.invoice_params_received()?;
+		Ok(())
+	}
+}
+
+#[derive(PartialEq, Debug)]
+enum OutboundJITChannelState {
+	InvoiceParametersGenerated {
+		scid: u64,
+		cltv_expiry_delta: u32,
+		payment_size_msat: Option<u64>,
+		opening_fee_params: OpeningFeeParams,
+	},
+	PendingChannelOpen {
+		intercept_id: InterceptId,
+		opening_fee_msat: u64,
+		amt_to_forward_msat: u64,
+	},
+	ChannelReady {
+		intercept_id: InterceptId,
+		amt_to_forward_msat: u64,
+	},
+}
+
+impl OutboundJITChannelState {
+	pub fn new(
+		scid: u64, cltv_expiry_delta: u32, payment_size_msat: Option<u64>,
+		opening_fee_params: OpeningFeeParams,
+	) -> Self {
+		OutboundJITChannelState::InvoiceParametersGenerated {
+			scid,
+			cltv_expiry_delta,
 			payment_size_msat,
-			scid: None,
-			amt_to_forward_msat: None,
-			lsp_cltv_expiry_delta: None,
-			intercept_id: None,
+			opening_fee_params,
+		}
+	}
+
+	pub fn htlc_intercepted(
+		&self, expected_outbound_amount_msat: u64, intercept_id: InterceptId,
+	) -> Result<Self, ChannelStateError> {
+		match self {
+			OutboundJITChannelState::InvoiceParametersGenerated { opening_fee_params, .. } => {
+				let opening_fee_msat: Option<u64> = utils::compute_opening_fee(
+					expected_outbound_amount_msat,
+					opening_fee_params.min_fee_msat,
+					opening_fee_params.proportional as u64,
+				);
+
+				if let Some(opening_fee_msat) = opening_fee_msat {
+					Ok(OutboundJITChannelState::PendingChannelOpen {
+						intercept_id,
+						opening_fee_msat,
+						amt_to_forward_msat: expected_outbound_amount_msat - opening_fee_msat,
+					})
+				} else {
+					Err(ChannelStateError(format!("Could not compute valid opening fee with min_fee_msat = {}, proportional = {}, and expected_outbound_amount_msat = {}", opening_fee_params.min_fee_msat, opening_fee_params.proportional, expected_outbound_amount_msat)))
+				}
+			}
+			state => Err(ChannelStateError(format!(
+				"Invoice params received when JIT Channel was in state: {:?}",
+				state
+			))),
+		}
+	}
+
+	pub fn channel_ready(&self) -> Result<Self, ChannelStateError> {
+		match self {
+			OutboundJITChannelState::PendingChannelOpen {
+				intercept_id,
+				amt_to_forward_msat,
+				..
+			} => Ok(OutboundJITChannelState::ChannelReady {
+				intercept_id: *intercept_id,
+				amt_to_forward_msat: *amt_to_forward_msat,
+			}),
+			state => Err(ChannelStateError(format!(
+				"Channel ready received when JIT Channel was in state: {:?}",
+				state
+			))),
+		}
+	}
+}
+
+struct OutboundJITChannel {
+	state: OutboundJITChannelState,
+}
+
+impl OutboundJITChannel {
+	pub fn new(
+		scid: u64, cltv_expiry_delta: u32, payment_size_msat: Option<u64>,
+		opening_fee_params: OpeningFeeParams,
+	) -> Self {
+		Self {
+			state: OutboundJITChannelState::new(
+				scid,
+				cltv_expiry_delta,
+				payment_size_msat,
+				opening_fee_params,
+			),
+		}
+	}
+
+	pub fn htlc_intercepted(
+		&mut self, expected_outbound_amount_msat: u64, intercept_id: InterceptId,
+	) -> Result<(u64, u64), LightningError> {
+		self.state = self.state.htlc_intercepted(expected_outbound_amount_msat, intercept_id)?;
+
+		match &self.state {
+			OutboundJITChannelState::PendingChannelOpen {
+				opening_fee_msat,
+				amt_to_forward_msat,
+				..
+			} => Ok((*opening_fee_msat, *amt_to_forward_msat)),
+			impossible_state => Err(LightningError {
+				err: format!(
+					"Impossible state transition during htlc_intercepted to {:?}",
+					impossible_state
+				),
+				action: ErrorAction::IgnoreAndLog(Level::Info),
+			}),
+		}
+	}
+
+	pub fn channel_ready(&mut self) -> Result<(InterceptId, u64), LightningError> {
+		self.state = self.state.channel_ready()?;
+
+		match &self.state {
+			OutboundJITChannelState::ChannelReady { intercept_id, amt_to_forward_msat } => {
+				Ok((*intercept_id, *amt_to_forward_msat))
+			}
+			impossible_state => Err(LightningError {
+				err: format!(
+					"Impossible state transition during channel_ready to {:?}",
+					impossible_state
+				),
+				action: ErrorAction::IgnoreAndLog(Level::Info),
+			}),
 		}
 	}
 }
 
 #[derive(Default)]
 struct PeerState {
-	channels_by_id: HashMap<u128, JITChannel>,
+	inbound_channels_by_id: HashMap<u128, InboundJITChannel>,
+	outbound_channels_by_scid: HashMap<u64, OutboundJITChannel>,
 	request_to_cid: HashMap<RequestId, u128>,
 	pending_requests: HashMap<RequestId, Request>,
 }
 
 impl PeerState {
-	pub fn insert_channel(&mut self, channel_id: u128, channel: JITChannel) {
-		self.channels_by_id.insert(channel_id, channel);
+	pub fn insert_inbound_channel(&mut self, jit_channel_id: u128, channel: InboundJITChannel) {
+		self.inbound_channels_by_id.insert(jit_channel_id, channel);
 	}
 
-	pub fn insert_request(&mut self, request_id: RequestId, channel_id: u128) {
-		self.request_to_cid.insert(request_id, channel_id);
+	pub fn insert_outbound_channel(&mut self, scid: u64, channel: OutboundJITChannel) {
+		self.outbound_channels_by_scid.insert(scid, channel);
 	}
 
-	pub fn get_channel_in_state_for_request(
-		&mut self, request_id: &RequestId, state: JITChannelState,
-	) -> Option<&mut JITChannel> {
-		let channel_id = self.request_to_cid.remove(request_id)?;
-
-		if let Some(channel) = self.channels_by_id.get_mut(&channel_id) {
-			if channel.state == state {
-				return Some(channel);
-			}
-		}
-		None
+	pub fn insert_request(&mut self, request_id: RequestId, jit_channel_id: u128) {
+		self.request_to_cid.insert(request_id, jit_channel_id);
 	}
 
-	pub fn remove_channel(&mut self, channel_id: u128) {
-		self.channels_by_id.remove(&channel_id);
+	pub fn remove_inbound_channel(&mut self, jit_channel_id: u128) {
+		self.inbound_channels_by_id.remove(&jit_channel_id);
+	}
+
+	pub fn remove_outbound_channel(&mut self, scid: u64) {
+		self.outbound_channels_by_scid.remove(&scid);
 	}
 }
 
@@ -160,7 +355,7 @@ pub struct JITChannelManager<
 	pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
 	pending_events: Arc<EventQueue>,
 	per_peer_state: RwLock<HashMap<PublicKey, Mutex<PeerState>>>,
-	channels_by_scid: RwLock<HashMap<u64, JITChannel>>,
+	peer_by_scid: RwLock<HashMap<u64, PublicKey>>,
 	promise_secret: [u8; 32],
 }
 
@@ -205,10 +400,15 @@ where
 			pending_messages,
 			pending_events,
 			per_peer_state: RwLock::new(HashMap::new()),
-			channels_by_scid: RwLock::new(HashMap::new()),
+			peer_by_scid: RwLock::new(HashMap::new()),
 			peer_manager: Mutex::new(None),
 			channel_manager,
 		}
+	}
+
+	fn map_scid_to_peer(&self, scid: u64, counterparty_node_id: PublicKey) {
+		let mut peer_by_scid = self.peer_by_scid.write().unwrap();
+		peer_by_scid.insert(scid, counterparty_node_id);
 	}
 
 	pub fn set_peer_manager(
@@ -221,23 +421,19 @@ where
 		&self, counterparty_node_id: PublicKey, payment_size_msat: Option<u64>,
 		token: Option<String>, user_channel_id: u128,
 	) {
-		let channel_id = self.generate_channel_id();
-		let channel = JITChannel::new(
-			channel_id,
-			counterparty_node_id,
-			user_channel_id,
-			payment_size_msat,
-			token,
-		);
+		let jit_channel_id = self.generate_jit_channel_id();
+		let channel =
+			InboundJITChannel::new(jit_channel_id, user_channel_id, payment_size_msat, token);
 
-		let mut per_peer_state = self.per_peer_state.write().unwrap();
-		let peer_state_mutex =
-			per_peer_state.entry(counterparty_node_id).or_insert(Mutex::new(PeerState::default()));
-		let peer_state = peer_state_mutex.get_mut().unwrap();
-		peer_state.insert_channel(channel_id, channel);
+		let mut outer_state_lock = self.per_peer_state.write().unwrap();
+		let inner_state_lock = outer_state_lock
+			.entry(counterparty_node_id)
+			.or_insert(Mutex::new(PeerState::default()));
+		let peer_state = inner_state_lock.get_mut().unwrap();
+		peer_state.insert_inbound_channel(jit_channel_id, channel);
 
 		let request_id = self.generate_request_id();
-		peer_state.insert_request(request_id.clone(), channel_id);
+		peer_state.insert_request(request_id.clone(), jit_channel_id);
 
 		{
 			let mut pending_messages = self.pending_messages.lock().unwrap();
@@ -257,11 +453,11 @@ where
 		opening_fee_params_menu: Vec<RawOpeningFeeParams>, min_payment_size_msat: u64,
 		max_payment_size_msat: u64,
 	) -> Result<(), APIError> {
-		let per_peer_state = self.per_peer_state.read().unwrap();
+		let outer_state_lock = self.per_peer_state.read().unwrap();
 
-		match per_peer_state.get(&counterparty_node_id) {
-			Some(peer_state_mutex) => {
-				let mut peer_state = peer_state_mutex.lock().unwrap();
+		match outer_state_lock.get(&counterparty_node_id) {
+			Some(inner_state_lock) => {
+				let mut peer_state = inner_state_lock.lock().unwrap();
 
 				match peer_state.pending_requests.remove(&request_id) {
 					Some(Request::GetInfo(_)) => {
@@ -291,49 +487,46 @@ where
 	}
 
 	pub fn opening_fee_params_selected(
-		&self, counterparty_node_id: PublicKey, channel_id: u128,
+		&self, counterparty_node_id: PublicKey, jit_channel_id: u128,
 		opening_fee_params: OpeningFeeParams,
 	) -> Result<(), APIError> {
-		let per_peer_state = self.per_peer_state.read().unwrap();
-		match per_peer_state.get(&counterparty_node_id) {
-			Some(peer_state_mutex) => {
-				let mut peer_state = peer_state_mutex.lock().unwrap();
+		let outer_state_lock = self.per_peer_state.read().unwrap();
+		match outer_state_lock.get(&counterparty_node_id) {
+			Some(inner_state_lock) => {
+				let mut peer_state = inner_state_lock.lock().unwrap();
+				if let Some(jit_channel) =
+					peer_state.inbound_channels_by_id.get_mut(&jit_channel_id)
+				{
+					if let Err(e) = jit_channel.opening_fee_params_selected() {
+						peer_state.remove_inbound_channel(jit_channel_id);
+						return Err(APIError::APIMisuseError { err: e.err });
+					}
 
-				if let Some(channel) = peer_state.channels_by_id.get_mut(&channel_id) {
-					if channel.state == JITChannelState::PendingMenuSelection {
-						channel.state = JITChannelState::BuyRequested;
-						channel.fees = Some(opening_fee_params.clone());
+					let request_id = self.generate_request_id();
+					let payment_size_msat = jit_channel.config.payment_size_msat;
+					peer_state.insert_request(request_id.clone(), jit_channel_id);
 
-						let request_id = self.generate_request_id();
-						let payment_size_msat = channel.payment_size_msat;
-						peer_state.insert_request(request_id.clone(), channel_id);
-
-						{
-							let mut pending_messages = self.pending_messages.lock().unwrap();
-							pending_messages.push((
-								counterparty_node_id,
-								Message::Request(
-									request_id,
-									Request::Buy(BuyRequest {
-										version: SUPPORTED_SPEC_VERSION,
-										opening_fee_params,
-										payment_size_msat,
-									}),
-								)
-								.into(),
-							));
-						}
-						if let Some(peer_manager) = self.peer_manager.lock().unwrap().as_ref() {
-							peer_manager.process_events();
-						}
-					} else {
-						return Err(APIError::APIMisuseError {
-							err: "Channel is not pending menu selection".to_string(),
-						});
+					{
+						let mut pending_messages = self.pending_messages.lock().unwrap();
+						pending_messages.push((
+							counterparty_node_id,
+							Message::Request(
+								request_id,
+								Request::Buy(BuyRequest {
+									version: SUPPORTED_SPEC_VERSION,
+									opening_fee_params,
+									payment_size_msat,
+								}),
+							)
+							.into(),
+						));
+					}
+					if let Some(peer_manager) = self.peer_manager.lock().unwrap().as_ref() {
+						peer_manager.process_events();
 					}
 				} else {
 					return Err(APIError::APIMisuseError {
-						err: format!("Channel with id {} not found", channel_id),
+						err: format!("Channel with id {} not found", jit_channel_id),
 					});
 				}
 			}
@@ -351,33 +544,23 @@ where
 		&self, counterparty_node_id: PublicKey, request_id: RequestId, scid: u64,
 		cltv_expiry_delta: u32, client_trusts_lsp: bool,
 	) -> Result<(), APIError> {
-		let per_peer_state = self.per_peer_state.read().unwrap();
+		let outer_state_lock = self.per_peer_state.read().unwrap();
 
-		match per_peer_state.get(&counterparty_node_id) {
-			Some(peer_state_mutex) => {
-				let mut peer_state = peer_state_mutex.lock().unwrap();
+		match outer_state_lock.get(&counterparty_node_id) {
+			Some(inner_state_lock) => {
+				let mut peer_state = inner_state_lock.lock().unwrap();
 
 				match peer_state.pending_requests.remove(&request_id) {
 					Some(Request::Buy(buy_request)) => {
-						let mut channels_by_scid = self.channels_by_scid.write().unwrap();
-						channels_by_scid.insert(
+						self.map_scid_to_peer(scid, counterparty_node_id.clone());
+						let outbound_jit_channel = OutboundJITChannel::new(
 							scid,
-							JITChannel {
-								id: 0,
-								user_id: 0,
-								state: JITChannelState::BuyRequested,
-								fees: Some(buy_request.opening_fee_params),
-								token: None,
-								min_payment_size_msat: None,
-								max_payment_size_msat: None,
-								payment_size_msat: buy_request.payment_size_msat,
-								counterparty_node_id,
-								scid: Some(scid),
-								lsp_cltv_expiry_delta: Some(cltv_expiry_delta),
-								amt_to_forward_msat: None,
-								intercept_id: None,
-							},
+							cltv_expiry_delta,
+							buy_request.payment_size_msat,
+							buy_request.opening_fee_params,
 						);
+
+						peer_state.insert_outbound_channel(scid, outbound_jit_channel);
 
 						let block = scid_utils::block_from_scid(&scid);
 						let tx_index = scid_utils::tx_index_from_scid(&scid);
@@ -408,39 +591,45 @@ where
 		}
 	}
 
-	// need to decide if we should ignore, enqueue OpenChannel event, or enqueue FailInterceptedHTLC event
 	pub(crate) fn htlc_intercepted(
 		&self, scid: u64, intercept_id: InterceptId, inbound_amount_msat: u64,
 		expected_outbound_amount_msat: u64,
 	) -> Result<(), APIError> {
-		let mut channels_by_scid = self.channels_by_scid.write().unwrap();
-
-		if let Some(channel) = channels_by_scid.get_mut(&scid) {
-			if let Some(fees) = &channel.fees {
-				let opening_fee_msat = utils::compute_opening_fee(
-					expected_outbound_amount_msat,
-					fees.min_fee_msat,
-					fees.proportional as u64,
-				);
-
-				if let Some(opening_fee_msat) = opening_fee_msat {
-					let amt_to_forward_msat = expected_outbound_amount_msat - opening_fee_msat;
-					channel.amt_to_forward_msat = Some(amt_to_forward_msat);
-					channel.intercept_id = Some(intercept_id);
-
-					self.enqueue_event(Event::LSPS2(crate::JITChannelEvent::OpenChannel {
-						their_network_key: channel.counterparty_node_id,
-						inbound_amount_msat,
-						expected_outbound_amount_msat,
-						amt_to_forward_msat,
-						opening_fee_msat,
-						user_channel_id: scid as u128,
-					}));
-				} else {
-					self.channel_manager.fail_intercepted_htlc(intercept_id)?;
+		let peer_by_scid = self.peer_by_scid.read().unwrap();
+		if let Some(counterparty_node_id) = peer_by_scid.get(&scid) {
+			let outer_state_lock = self.per_peer_state.read().unwrap();
+			match outer_state_lock.get(counterparty_node_id) {
+				Some(inner_state_lock) => {
+					let mut peer_state = inner_state_lock.lock().unwrap();
+					if let Some(jit_channel) = peer_state.outbound_channels_by_scid.get_mut(&scid) {
+						match jit_channel
+							.htlc_intercepted(expected_outbound_amount_msat, intercept_id)
+						{
+							Ok((opening_fee_msat, amt_to_forward_msat)) => {
+								self.enqueue_event(Event::LSPS2(
+									crate::JITChannelEvent::OpenChannel {
+										their_network_key: counterparty_node_id.clone(),
+										inbound_amount_msat,
+										expected_outbound_amount_msat,
+										amt_to_forward_msat,
+										opening_fee_msat,
+										user_channel_id: scid as u128,
+									},
+								));
+							}
+							Err(e) => {
+								self.channel_manager.fail_intercepted_htlc(intercept_id)?;
+								// remove channel?
+								return Err(APIError::APIMisuseError { err: e.err });
+							}
+						}
+					}
 				}
-			} else {
-				self.channel_manager.fail_intercepted_htlc(intercept_id)?;
+				None => {
+					return Err(APIError::APIMisuseError {
+						err: format!("No counterparty found for scid: {}", scid),
+					});
+				}
 			}
 		}
 
@@ -449,36 +638,53 @@ where
 
 	// figure out which intercept id is waiting on this channel and enqueue ForwardInterceptedHTLC event
 	pub(crate) fn channel_ready(
-		&self, user_channel_id: u128, channel_id: &[u8; 32], counterparty_node_id: &PublicKey,
+		&self, user_channel_id: u128, channel_id: &ChannelId, counterparty_node_id: &PublicKey,
 	) -> Result<(), APIError> {
-		let channels_by_scid = self.channels_by_scid.read().unwrap();
-
 		if let Ok(scid) = user_channel_id.try_into() {
-			if let Some(channel) = channels_by_scid.get(&scid) {
-				self.channel_manager.forward_intercepted_htlc(
-					channel.intercept_id.unwrap(),
-					channel_id,
-					*counterparty_node_id,
-					channel.amt_to_forward_msat.unwrap(),
-				)?;
-			} else {
-				return Err(APIError::APIMisuseError {
-					err: format!(
-						"Could not find a channel with user_channel_id {}",
-						user_channel_id
-					),
-				});
+			let outer_state_lock = self.per_peer_state.read().unwrap();
+			match outer_state_lock.get(counterparty_node_id) {
+				Some(inner_state_lock) => {
+					let mut peer_state = inner_state_lock.lock().unwrap();
+					if let Some(jit_channel) = peer_state.outbound_channels_by_scid.get_mut(&scid) {
+						match jit_channel.channel_ready() {
+							Ok((intercept_id, amt_to_forward_msat)) => {
+								self.channel_manager.forward_intercepted_htlc(
+									intercept_id,
+									channel_id,
+									*counterparty_node_id,
+									amt_to_forward_msat,
+								)?;
+							}
+							Err(e) => {
+								return Err(APIError::APIMisuseError {
+									err: format!(
+										"Failed to transition to channel ready: {}",
+										e.err
+									),
+								})
+							}
+						}
+					} else {
+						return Err(APIError::APIMisuseError {
+							err: format!(
+								"Could not find a channel with user_channel_id {}",
+								user_channel_id
+							),
+						});
+					}
+				}
+				None => {
+					return Err(APIError::APIMisuseError {
+						err: format!("No counterparty state for: {}", counterparty_node_id),
+					});
+				}
 			}
-		} else {
-			return Err(APIError::APIMisuseError {
-				err: format!("Could not parse user_channel_id into u64 scid {}", user_channel_id),
-			});
 		}
 
 		Ok(())
 	}
 
-	fn generate_channel_id(&self) -> u128 {
+	fn generate_jit_channel_id(&self) -> u128 {
 		let bytes = self.entropy_source.get_secure_random_bytes();
 		let mut id_bytes: [u8; 16] = [0; 16];
 		id_bytes.copy_from_slice(&bytes[0..16]);
@@ -523,56 +729,58 @@ where
 	fn handle_get_versions_response(
 		&self, request_id: RequestId, counterparty_node_id: &PublicKey, result: GetVersionsResponse,
 	) -> Result<(), LightningError> {
-		let per_peer_state = self.per_peer_state.read().unwrap();
-		match per_peer_state.get(counterparty_node_id) {
-			Some(peer_state_mutex) => {
-				let mut peer_state = peer_state_mutex.lock().unwrap();
+		let outer_state_lock = self.per_peer_state.read().unwrap();
+		match outer_state_lock.get(counterparty_node_id) {
+			Some(inner_state_lock) => {
+				let mut peer_state = inner_state_lock.lock().unwrap();
 
-				match peer_state.get_channel_in_state_for_request(
-					&request_id,
-					JITChannelState::VersionsRequested,
-				) {
-					Some(channel) => {
-						let channel_id = channel.id;
-						let token = channel.token.clone();
+				let jit_channel_id =
+					peer_state.request_to_cid.remove(&request_id).ok_or(LightningError {
+						err: format!(
+							"Received get_versions response for an unknown request: {:?}",
+							request_id
+						),
+						action: ErrorAction::IgnoreAndLog(Level::Info),
+					})?;
 
-						if result.versions.contains(&SUPPORTED_SPEC_VERSION) {
-							channel.state = JITChannelState::MenuRequested;
+				let jit_channel = peer_state
+					.inbound_channels_by_id
+					.get_mut(&jit_channel_id)
+					.ok_or(LightningError {
+						err: format!(
+							"Received get_versions response for an unknown channel: {:?}",
+							jit_channel_id
+						),
+						action: ErrorAction::IgnoreAndLog(Level::Info),
+					})?;
 
-							let request_id = self.generate_request_id();
-							peer_state.insert_request(request_id.clone(), channel_id);
+				let token = jit_channel.config.token.clone();
 
-							{
-								let mut pending_messages = self.pending_messages.lock().unwrap();
-								pending_messages.push((
-									*counterparty_node_id,
-									Message::Request(
-										request_id,
-										Request::GetInfo(GetInfoRequest {
-											version: SUPPORTED_SPEC_VERSION,
-											token,
-										}),
-									)
-									.into(),
-								));
-							}
+				if let Err(e) = jit_channel.versions_received(result.versions) {
+					peer_state.remove_inbound_channel(jit_channel_id);
+					return Err(e);
+				}
 
-							if let Some(peer_manager) = self.peer_manager.lock().unwrap().as_ref() {
-								peer_manager.process_events();
-							}
-						} else {
-							peer_state.remove_channel(channel_id);
-						}
-					}
-					None => {
-						return Err(LightningError {
-							err: format!(
-								"Received get_versions response without a matching channel: {:?}",
-								request_id
-							),
-							action: ErrorAction::IgnoreAndLog(Level::Info),
-						})
-					}
+				let request_id = self.generate_request_id();
+				peer_state.insert_request(request_id.clone(), jit_channel_id);
+
+				{
+					let mut pending_messages = self.pending_messages.lock().unwrap();
+					pending_messages.push((
+						*counterparty_node_id,
+						Message::Request(
+							request_id,
+							Request::GetInfo(GetInfoRequest {
+								version: SUPPORTED_SPEC_VERSION,
+								token,
+							}),
+						)
+						.into(),
+					));
+				}
+
+				if let Some(peer_manager) = self.peer_manager.lock().unwrap().as_ref() {
+					peer_manager.process_events();
 				}
 			}
 			None => {
@@ -592,10 +800,11 @@ where
 	fn handle_get_info_request(
 		&self, request_id: RequestId, counterparty_node_id: &PublicKey, params: GetInfoRequest,
 	) -> Result<(), LightningError> {
-		let mut per_peer_state = self.per_peer_state.write().unwrap();
-		let peer_state_mutex: &mut Mutex<PeerState> =
-			per_peer_state.entry(*counterparty_node_id).or_insert(Mutex::new(PeerState::default()));
-		let peer_state = peer_state_mutex.get_mut().unwrap();
+		let mut outer_state_lock = self.per_peer_state.write().unwrap();
+		let inner_state_lock: &mut Mutex<PeerState> = outer_state_lock
+			.entry(*counterparty_node_id)
+			.or_insert(Mutex::new(PeerState::default()));
+		let peer_state = inner_state_lock.get_mut().unwrap();
 		peer_state.pending_requests.insert(request_id.clone(), Request::GetInfo(params.clone()));
 
 		self.enqueue_event(Event::LSPS2(super::event::Event::GetInfo {
@@ -610,38 +819,44 @@ where
 	fn handle_get_info_response(
 		&self, request_id: RequestId, counterparty_node_id: &PublicKey, result: GetInfoResponse,
 	) -> Result<(), LightningError> {
-		let per_peer_state = self.per_peer_state.read().unwrap();
-		match per_peer_state.get(counterparty_node_id) {
-			Some(peer_state_mutex) => {
-				let mut peer_state = peer_state_mutex.lock().unwrap();
+		let outer_state_lock = self.per_peer_state.read().unwrap();
+		match outer_state_lock.get(counterparty_node_id) {
+			Some(inner_state_lock) => {
+				let mut peer_state = inner_state_lock.lock().unwrap();
 
-				match peer_state
-					.get_channel_in_state_for_request(&request_id, JITChannelState::MenuRequested)
-				{
-					Some(channel) => {
-						channel.state = JITChannelState::PendingMenuSelection;
-						channel.min_payment_size_msat = Some(result.min_payment_size_msat);
-						channel.max_payment_size_msat = Some(result.max_payment_size_msat);
+				let jit_channel_id =
+					peer_state.request_to_cid.remove(&request_id).ok_or(LightningError {
+						err: format!(
+							"Received get_info response for an unknown request: {:?}",
+							request_id
+						),
+						action: ErrorAction::IgnoreAndLog(Level::Info),
+					})?;
 
-						self.enqueue_event(Event::LSPS2(super::event::Event::GetInfoResponse {
-							counterparty_node_id: *counterparty_node_id,
-							opening_fee_params_menu: result.opening_fee_params_menu,
-							min_payment_size_msat: result.min_payment_size_msat,
-							max_payment_size_msat: result.max_payment_size_msat,
-							channel_id: channel.id,
-							user_channel_id: channel.user_id,
-						}));
-					}
-					None => {
-						return Err(LightningError {
-							err: format!(
-								"Received get_info response without a matching channel: {:?}",
-								request_id
-							),
-							action: ErrorAction::IgnoreAndLog(Level::Info),
-						})
-					}
+				let jit_channel = peer_state
+					.inbound_channels_by_id
+					.get_mut(&jit_channel_id)
+					.ok_or(LightningError {
+						err: format!(
+							"Received get_info response for an unknown channel: {:?}",
+							jit_channel_id
+						),
+						action: ErrorAction::IgnoreAndLog(Level::Info),
+					})?;
+
+				if let Err(e) = jit_channel.info_received() {
+					peer_state.remove_inbound_channel(jit_channel_id);
+					return Err(e);
 				}
+
+				self.enqueue_event(Event::LSPS2(super::event::Event::GetInfoResponse {
+					counterparty_node_id: *counterparty_node_id,
+					opening_fee_params_menu: result.opening_fee_params_menu,
+					min_payment_size_msat: result.min_payment_size_msat,
+					max_payment_size_msat: result.max_payment_size_msat,
+					channel_id: jit_channel.id,
+					user_channel_id: jit_channel.config.user_id,
+				}));
 			}
 			None => {
 				return Err(LightningError {
@@ -658,37 +873,36 @@ where
 	}
 
 	fn handle_get_info_error(
-		&self, request_id: RequestId, counterparty_node_id: &PublicKey, error: ResponseError,
+		&self, request_id: RequestId, counterparty_node_id: &PublicKey, _error: ResponseError,
 	) -> Result<(), LightningError> {
-		let per_peer_state = self.per_peer_state.read().unwrap();
-		match per_peer_state.get(counterparty_node_id) {
-			Some(peer_state_mutex) => {
-				let mut peer_state = peer_state_mutex.lock().unwrap();
+		let outer_state_lock = self.per_peer_state.read().unwrap();
+		match outer_state_lock.get(counterparty_node_id) {
+			Some(inner_state_lock) => {
+				let mut peer_state = inner_state_lock.lock().unwrap();
 
-				match peer_state
-					.get_channel_in_state_for_request(&request_id, JITChannelState::BuyRequested)
-				{
-					Some(channel) => {
-						let channel_id = channel.id;
-						peer_state.remove_channel(channel_id);
-						return Err(LightningError {
-							err: format!("Received error response from getinfo request ({:?}) with counterparty {:?}.  Removing channel {}. code = {}, message = {}", request_id, counterparty_node_id, channel_id, error.code, error.message),
-							action: ErrorAction::IgnoreAndLog(Level::Info)
-						});
-					}
-					None => {
-						return Err(LightningError {
-							err: format!("Received an unexpected error response for a getinfo request from counterparty ({:?})", counterparty_node_id),
-							action: ErrorAction::IgnoreAndLog(Level::Info)
-						});
-					}
-				}
+				let jit_channel_id =
+					peer_state.request_to_cid.remove(&request_id).ok_or(LightningError {
+						err: format!(
+							"Received get_info error for an unknown request: {:?}",
+							request_id
+						),
+						action: ErrorAction::IgnoreAndLog(Level::Info),
+					})?;
+
+				let _jit_channel = peer_state
+					.inbound_channels_by_id
+					.remove(&jit_channel_id)
+					.ok_or(LightningError {
+						err: format!(
+							"Received get_info error for an unknown channel: {:?}",
+							jit_channel_id
+						),
+						action: ErrorAction::IgnoreAndLog(Level::Info),
+					})?;
+				Ok(())
 			}
 			None => {
-				return Err(LightningError {
-					err: format!("Received error response for a getinfo request from an unknown counterparty ({:?})", counterparty_node_id),
-					action: ErrorAction::IgnoreAndLog(Level::Info)
-				});
+				return Err(LightningError { err: format!("Received error response for a get_info request from an unknown counterparty ({:?})",counterparty_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
 			}
 		}
 	}
@@ -697,11 +911,11 @@ where
 		&self, request_id: RequestId, counterparty_node_id: &PublicKey, params: BuyRequest,
 	) -> Result<(), LightningError> {
 		if params.opening_fee_params.is_valid(&self.promise_secret) {
-			let mut per_peer_state = self.per_peer_state.write().unwrap();
-			let peer_state_mutex = per_peer_state
+			let mut outer_state_lock = self.per_peer_state.write().unwrap();
+			let inner_state_lock = outer_state_lock
 				.entry(*counterparty_node_id)
 				.or_insert(Mutex::new(PeerState::default()));
-			let peer_state = peer_state_mutex.get_mut().unwrap();
+			let peer_state = inner_state_lock.get_mut().unwrap();
 			peer_state.pending_requests.insert(request_id.clone(), Request::Buy(params.clone()));
 
 			self.enqueue_event(Event::LSPS2(super::event::Event::BuyRequest {
@@ -718,55 +932,55 @@ where
 	fn handle_buy_response(
 		&self, request_id: RequestId, counterparty_node_id: &PublicKey, result: BuyResponse,
 	) -> Result<(), LightningError> {
-		let per_peer_state = self.per_peer_state.read().unwrap();
-		match per_peer_state.get(counterparty_node_id) {
-			Some(peer_state_mutex) => {
-				let mut peer_state = peer_state_mutex.lock().unwrap();
+		let outer_state_lock = self.per_peer_state.read().unwrap();
+		match outer_state_lock.get(counterparty_node_id) {
+			Some(inner_state_lock) => {
+				let mut peer_state = inner_state_lock.lock().unwrap();
 
-				match peer_state
-					.get_channel_in_state_for_request(&request_id, JITChannelState::BuyRequested)
+				let jit_channel_id =
+					peer_state.request_to_cid.remove(&request_id).ok_or(LightningError {
+						err: format!(
+							"Received buy response for an unknown request: {:?}",
+							request_id
+						),
+						action: ErrorAction::IgnoreAndLog(Level::Info),
+					})?;
+
+				let jit_channel = peer_state
+					.inbound_channels_by_id
+					.get_mut(&jit_channel_id)
+					.ok_or(LightningError {
+						err: format!(
+							"Received buy response for an unknown channel: {:?}",
+							jit_channel_id
+						),
+						action: ErrorAction::IgnoreAndLog(Level::Info),
+					})?;
+
+				if let Err(e) = jit_channel.invoice_params_received() {
+					peer_state.remove_inbound_channel(jit_channel_id);
+					return Err(e);
+				}
+
+				if let Ok(scid) =
+					scid_utils::scid_from_human_readable_string(&result.jit_channel_scid)
 				{
-					Some(channel) => {
-						channel.state = JITChannelState::PendingPayment;
-						channel.lsp_cltv_expiry_delta = Some(result.lsp_cltv_expiry_delta);
-
-						if let Ok(scid) =
-							scid_utils::scid_from_human_readable_string(&result.jit_channel_scid)
-						{
-							channel.scid = Some(scid);
-
-							self.enqueue_event(Event::LSPS2(
-								super::event::Event::InvoiceGenerationReady {
-									counterparty_node_id: *counterparty_node_id,
-									scid,
-									cltv_expiry_delta: result.lsp_cltv_expiry_delta,
-									min_payment_size_msat: channel.min_payment_size_msat,
-									max_payment_size_msat: channel.max_payment_size_msat,
-									payment_size_msat: channel.payment_size_msat,
-									fees: channel.fees.clone().unwrap(),
-									client_trusts_lsp: result.client_trusts_lsp,
-									user_channel_id: channel.user_id,
-								},
-							));
-						} else {
-							return Err(LightningError {
-								err: format!(
-									"Received buy response with an invalid scid {}",
-									result.jit_channel_scid
-								),
-								action: ErrorAction::IgnoreAndLog(Level::Info),
-							});
-						}
-					}
-					None => {
-						return Err(LightningError {
-							err: format!(
-								"Received buy response without a matching channel: {:?}",
-								request_id
-							),
-							action: ErrorAction::IgnoreAndLog(Level::Info),
-						});
-					}
+					self.enqueue_event(Event::LSPS2(super::event::Event::InvoiceGenerationReady {
+						counterparty_node_id: *counterparty_node_id,
+						scid,
+						cltv_expiry_delta: result.lsp_cltv_expiry_delta,
+						payment_size_msat: jit_channel.config.payment_size_msat,
+						client_trusts_lsp: result.client_trusts_lsp,
+						user_channel_id: jit_channel.config.user_id,
+					}));
+				} else {
+					return Err(LightningError {
+						err: format!(
+							"Received buy response with an invalid scid {}",
+							result.jit_channel_scid
+						),
+						action: ErrorAction::IgnoreAndLog(Level::Info),
+					});
 				}
 			}
 			None => {
@@ -783,25 +997,30 @@ where
 	}
 
 	fn handle_buy_error(
-		&self, request_id: RequestId, counterparty_node_id: &PublicKey, error: ResponseError,
+		&self, request_id: RequestId, counterparty_node_id: &PublicKey, _error: ResponseError,
 	) -> Result<(), LightningError> {
-		let per_peer_state = self.per_peer_state.read().unwrap();
-		match per_peer_state.get(counterparty_node_id) {
-			Some(peer_state_mutex) => {
-				let mut peer_state = peer_state_mutex.lock().unwrap();
+		let outer_state_lock = self.per_peer_state.read().unwrap();
+		match outer_state_lock.get(counterparty_node_id) {
+			Some(inner_state_lock) => {
+				let mut peer_state = inner_state_lock.lock().unwrap();
 
-				match peer_state
-					.get_channel_in_state_for_request(&request_id, JITChannelState::BuyRequested)
-				{
-					Some(channel) => {
-						let channel_id = channel.id;
-						peer_state.remove_channel(channel_id);
-						return Err(LightningError { err: format!( "Received error response from buy request ({:?}) with counterparty {:?}.  Removing channel {}. code = {}, message = {}", request_id, counterparty_node_id, channel_id, error.code, error.message), action: ErrorAction::IgnoreAndLog(Level::Info)});
-					}
-					None => {
-						return Err(LightningError { err: format!("Received an unexpected error response for a buy request from counterparty ({:?})", counterparty_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
-					}
-				}
+				let jit_channel_id =
+					peer_state.request_to_cid.remove(&request_id).ok_or(LightningError {
+						err: format!("Received buy error for an unknown request: {:?}", request_id),
+						action: ErrorAction::IgnoreAndLog(Level::Info),
+					})?;
+
+				let _jit_channel = peer_state
+					.inbound_channels_by_id
+					.remove(&jit_channel_id)
+					.ok_or(LightningError {
+						err: format!(
+							"Received buy error for an unknown channel: {:?}",
+							jit_channel_id
+						),
+						action: ErrorAction::IgnoreAndLog(Level::Info),
+					})?;
+				Ok(())
 			}
 			None => {
 				return Err(LightningError { err: format!("Received error response for a buy request from an unknown counterparty ({:?})",counterparty_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});

@@ -8,8 +8,8 @@ description = "Types and primitives to integrate a spec-compliant LSP with an LD
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-lightning = { version = "0.0.116", default-features = false, features = ["max_level_trace", "no-std", "grind_signatures"] }
-lightning-invoice = { version = "0.24.0", default-features = false, features = ["no-std"] }
+lightning = { version = "0.0.117-alpha2", default-features = false, features = ["max_level_trace", "no-std", "grind_signatures"] }
+lightning-invoice = { version = "0.25.0-alpha2", default-features = false, features = ["no-std"] }
 
 bitcoin = { version = "0.29.2", default-features = false, features = ["serde", "secp-recovery", "rand"] }
 

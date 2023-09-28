@@ -22,7 +22,7 @@ const JSONRPC_INVALID_MESSAGE_ERROR_CODE: i32 = -32700;
 const JSONRPC_INVALID_MESSAGE_ERROR_MESSAGE: &str = "parse error";
 const LSPS0_LISTPROTOCOLS_METHOD_NAME: &str = "lsps0.list_protocols";
 
-/// The lightning message type id for lsps messages
+/// The Lightning message type id for LSPS messages
 pub const LSPS_MESSAGE_TYPE_ID: u16 = 37913;
 
 /// Lightning message type used by LSPS protocols
@@ -277,7 +277,7 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 						LSPS0Request::ListProtocols(ListProtocolsRequest {}),
 					)))
 				}
-				jit_channel::msgs::LSPS2_GETVERSIONS_METHOD_NAME => {
+				jit_channel::msgs::LSPS2_GET_VERSIONS_METHOD_NAME => {
 					let request = serde_json::from_value(params.unwrap_or(json!({})))
 						.map_err(de::Error::custom)?;
 					Ok(LSPSMessage::LSPS2(jit_channel::msgs::Message::Request(
@@ -285,7 +285,7 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 						jit_channel::msgs::Request::GetVersions(request),
 					)))
 				}
-				jit_channel::msgs::LSPS2_GETINFO_METHOD_NAME => {
+				jit_channel::msgs::LSPS2_GET_INFO_METHOD_NAME => {
 					let request = serde_json::from_value(params.unwrap_or(json!({})))
 						.map_err(de::Error::custom)?;
 					Ok(LSPSMessage::LSPS2(jit_channel::msgs::Message::Request(
@@ -325,7 +325,7 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 							Err(de::Error::custom("Received invalid JSON-RPC object: one of method, result, or error required"))
 						}
 					}
-					jit_channel::msgs::LSPS2_GETVERSIONS_METHOD_NAME => {
+					jit_channel::msgs::LSPS2_GET_VERSIONS_METHOD_NAME => {
 						if let Some(result) = result {
 							let response =
 								serde_json::from_value(result).map_err(de::Error::custom)?;
@@ -337,7 +337,7 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 							Err(de::Error::custom("Received invalid lsps2.getversions response."))
 						}
 					}
-					jit_channel::msgs::LSPS2_GETINFO_METHOD_NAME => {
+					jit_channel::msgs::LSPS2_GET_INFO_METHOD_NAME => {
 						if let Some(error) = error {
 							Ok(LSPSMessage::LSPS2(jit_channel::msgs::Message::Response(
 								RequestId(id),

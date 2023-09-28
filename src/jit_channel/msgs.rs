@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use crate::transport::msgs::{LSPSMessage, RequestId, ResponseError};
 use crate::utils;
 
-pub(crate) const LSPS2_GETVERSIONS_METHOD_NAME: &str = "lsps2.getversions";
-pub(crate) const LSPS2_GETINFO_METHOD_NAME: &str = "lsps2.getinfo";
+pub(crate) const LSPS2_GET_VERSIONS_METHOD_NAME: &str = "lsps2.get_versions";
+pub(crate) const LSPS2_GET_INFO_METHOD_NAME: &str = "lsps2.get_info";
 pub(crate) const LSPS2_BUY_METHOD_NAME: &str = "lsps2.buy";
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
@@ -118,7 +118,7 @@ pub struct BuyRequest {
 }
 
 /// A response from a buy request made by a client
-/// 
+///
 /// Includes information needed to construct an invoice.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct BuyResponse {
@@ -141,8 +141,8 @@ pub enum Request {
 impl Request {
 	pub fn method(&self) -> &str {
 		match self {
-			Request::GetVersions(_) => LSPS2_GETVERSIONS_METHOD_NAME,
-			Request::GetInfo(_) => LSPS2_GETINFO_METHOD_NAME,
+			Request::GetVersions(_) => LSPS2_GET_VERSIONS_METHOD_NAME,
+			Request::GetInfo(_) => LSPS2_GET_INFO_METHOD_NAME,
 			Request::Buy(_) => LSPS2_BUY_METHOD_NAME,
 		}
 	}

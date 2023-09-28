@@ -54,7 +54,7 @@ impl EventQueue {
 	}
 }
 
-/// An Event which you should probably take some action in response to.
+/// An event which you should probably take some action in response to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
 	/// A LSPS2 (JIT Channel) protocol event
