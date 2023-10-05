@@ -8,5 +8,7 @@
 // licenses.
 
 //! Types and primitives that implement the LSPS3: JIT Channel Negotiation specification.
+pub mod channel_manager;
 pub mod event;
 pub mod msgs;
+pub mod scid_utils;
