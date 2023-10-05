@@ -24,4 +24,5 @@ mod jit_channel;
 mod transport;
 mod utils;
 
+pub use jit_channel::event::Event as JITChannelEvent;
 pub use transport::message_handler::{LiquidityManager, LiquidityProviderConfig};
