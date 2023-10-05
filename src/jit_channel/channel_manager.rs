@@ -61,7 +61,7 @@ enum InboundJITChannelState {
 	MenuRequested,
 	PendingMenuSelection,
 	BuyRequested,
-	PendingPayment,
+	PendingPayment { client_trusts_lsp: bool, scid: String },
 }
 
 impl InboundJITChannelState {
@@ -106,9 +106,9 @@ impl InboundJITChannelState {
 		}
 	}
 
-	fn invoice_params_received(&self) -> Result<Self, ChannelStateError> {
+	fn invoice_params_received(&self, client_trusts_lsp: bool, scid: String) -> Result<Self, ChannelStateError> {
 		match self {
-			InboundJITChannelState::BuyRequested => Ok(InboundJITChannelState::PendingPayment),
+			InboundJITChannelState::BuyRequested => Ok(InboundJITChannelState::PendingPayment { client_trusts_lsp, scid }),
 			state => Err(ChannelStateError(format!(
 				"Invoice params received when JIT Channel was in state: {:?}",
 				state
@@ -149,8 +149,8 @@ impl InboundJITChannel {
 		Ok(())
 	}
 
-	pub fn invoice_params_received(&mut self) -> Result<(), LightningError> {
-		self.state = self.state.invoice_params_received()?;
+	pub fn invoice_params_received(&mut self, client_trusts_lsp: bool, jit_channel_scid: String) -> Result<(), LightningError> {
+		self.state = self.state.invoice_params_received(client_trusts_lsp, jit_channel_scid)?;
 		Ok(())
 	}
 }
@@ -602,6 +602,13 @@ where
 				Some(inner_state_lock) => {
 					let mut peer_state = inner_state_lock.lock().unwrap();
 					if let Some(jit_channel) = peer_state.outbound_channels_by_scid.get_mut(&scid) {
+
+						// TODO: Need to support MPP payments. If payment_amount_msat is known, needs to queue intercepted HTLCs in a map by payment_hash
+						//       LiquidityManager will need to be regularly polled so it can continually check if the payment amount has been received
+						//       and can release the payment or if the channel valid_until has expired and should be failed.
+						//       Can perform check each time HTLC is received and on interval? I guess interval only needs to check expiration as 
+						//       we can only reach threshold when htlc is intercepted.  
+
 						match jit_channel
 							.htlc_intercepted(expected_outbound_amount_msat, intercept_id)
 						{
@@ -910,6 +917,11 @@ where
 	fn handle_buy_request(
 		&self, request_id: RequestId, counterparty_node_id: &PublicKey, params: BuyRequest,
 	) -> Result<(), LightningError> {
+		// TODO: need to perform check on `params.version`.
+		// TODO: if payment_size_msat is specified, make sure opening_fee is >= payment_size_msat.
+		// TODO: if payment_size_msat is specified, make sure opening_fee does not hit overflow error.
+		// TODO: if payment_size_msat is specified, make sure our node has sufficient incoming liquidity from public network to receive it.
+
 		if params.opening_fee_params.is_valid(&self.promise_secret) {
 			let mut outer_state_lock = self.per_peer_state.write().unwrap();
 			let inner_state_lock = outer_state_lock
@@ -957,7 +969,7 @@ where
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					})?;
 
-				if let Err(e) = jit_channel.invoice_params_received() {
+				if let Err(e) = jit_channel.invoice_params_received(result.client_trusts_lsp, result.jit_channel_scid.clone()) {
 					peer_state.remove_inbound_channel(jit_channel_id);
 					return Err(e);
 				}

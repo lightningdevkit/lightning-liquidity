@@ -85,6 +85,7 @@ pub struct OpeningFeeParams {
 
 impl OpeningFeeParams {
 	/// Determine that these parameters are valid given the secret used to generate the promise.
+	// TODO: add validation check that valid_until >= now()
 	pub fn is_valid(&self, promise_secret: &[u8; 32]) -> bool {
 		let mut hmac = HmacEngine::<Sha256>::new(promise_secret);
 		hmac.input(&self.min_fee_msat.to_be_bytes());
