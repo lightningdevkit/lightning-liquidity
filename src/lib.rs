@@ -25,4 +25,8 @@ mod transport;
 mod utils;
 
 pub use jit_channel::event::Event as JITChannelEvent;
-pub use transport::message_handler::{LiquidityManager, LiquidityProviderConfig};
+pub use jit_channel::msgs::{BuyResponse, GetInfoResponse, OpeningFeeParams, RawOpeningFeeParams};
+pub use transport::message_handler::{
+	JITChannelsConfig, LiquidityManager, LiquidityProviderConfig,
+};
+pub use transport::msgs::{RawLSPSMessage, LSPS_MESSAGE_TYPE_ID};
