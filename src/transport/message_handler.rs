@@ -1,5 +1,5 @@
 use crate::events::{Event, EventQueue};
-use crate::transport::msgs::{LSPSMessage, RawLSPSMessage, LSPS_MESSAGE_TYPE};
+use crate::transport::msgs::{LSPSMessage, RawLSPSMessage, LSPS_MESSAGE_TYPE_ID};
 use crate::transport::protocol::LSPS0MessageHandler;
 
 use lightning::chain::chaininterface::{BroadcasterInterface, FeeEstimator};
@@ -20,7 +20,6 @@ use bitcoin::BlockHash;
 
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::io;
 use std::ops::Deref;
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -154,6 +153,15 @@ where {
 			LSPSMessage::LSPS0(msg) => {
 				self.lsps0_message_handler.handle_message(msg, sender_node_id)?;
 			}
+			_ => {
+				return Err(LightningError {
+					err: format!(
+						"Received message without message handler configured. From node = {:?}",
+						sender_node_id
+					),
+					action: ErrorAction::IgnoreAndLog(Level::Info),
+				});
+			}
 		}
 		Ok(())
 	}
@@ -188,11 +196,11 @@ where
 {
 	type CustomMessage = RawLSPSMessage;
 
-	fn read<RD: io::Read>(
+	fn read<RD: lightning::io::Read>(
 		&self, message_type: u16, buffer: &mut RD,
 	) -> Result<Option<Self::CustomMessage>, lightning::ln::msgs::DecodeError> {
 		match message_type {
-			LSPS_MESSAGE_TYPE => Ok(Some(RawLSPSMessage::read(buffer)?)),
+			LSPS_MESSAGE_TYPE_ID => Ok(Some(RawLSPSMessage::read(buffer)?)),
 			_ => Ok(None),
 		}
 	}
