@@ -1,4 +1,7 @@
-use crate::jit_channel;
+use crate::jit_channel::msgs::{
+	LSPS2Message, LSPS2Request, LSPS2Response, LSPS2_BUY_METHOD_NAME, LSPS2_GET_INFO_METHOD_NAME,
+	LSPS2_GET_VERSIONS_METHOD_NAME,
+};
 
 use lightning::impl_writeable_msg;
 use lightning::ln::wire;
@@ -23,13 +26,13 @@ const JSONRPC_INVALID_MESSAGE_ERROR_CODE: i32 = -32700;
 const JSONRPC_INVALID_MESSAGE_ERROR_MESSAGE: &str = "parse error";
 const LSPS0_LISTPROTOCOLS_METHOD_NAME: &str = "lsps0.list_protocols";
 
-/// The Lightning message type id for LSPS messages
+/// The Lightning message type id for LSPS messages.
 pub const LSPS_MESSAGE_TYPE_ID: u16 = 37913;
 
-/// Lightning message type used by LSPS protocols
+/// Lightning message type used by LSPS protocols.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RawLSPSMessage {
-	/// The raw string payload that holds the actual message
+	/// The raw string payload that holds the actual message.
 	pub payload: String,
 }
 
@@ -52,7 +55,6 @@ pub struct ResponseError {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
-#[serde(default)]
 pub struct ListProtocolsRequest {}
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -107,7 +109,7 @@ impl From<LSPS0Message> for LSPSMessage {
 pub enum LSPSMessage {
 	Invalid,
 	LSPS0(LSPS0Message),
-	LSPS2(jit_channel::msgs::Message),
+	LSPS2(LSPS2Message),
 }
 
 impl LSPSMessage {
@@ -124,7 +126,7 @@ impl LSPSMessage {
 			LSPSMessage::LSPS0(LSPS0Message::Request(request_id, request)) => {
 				Some((request_id.0.clone(), request.method().to_string()))
 			}
-			LSPSMessage::LSPS2(jit_channel::msgs::Message::Request(request_id, request)) => {
+			LSPSMessage::LSPS2(LSPS2Message::Request(request_id, request)) => {
 				Some((request_id.0.clone(), request.method().to_string()))
 			}
 			_ => None,
@@ -165,39 +167,39 @@ impl Serialize for LSPSMessage {
 					}
 				}
 			}
-			LSPSMessage::LSPS2(jit_channel::msgs::Message::Request(request_id, request)) => {
+			LSPSMessage::LSPS2(LSPS2Message::Request(request_id, request)) => {
 				jsonrpc_object.serialize_field(JSONRPC_ID_FIELD_KEY, &request_id.0)?;
 				jsonrpc_object.serialize_field(JSONRPC_METHOD_FIELD_KEY, request.method())?;
 
 				match request {
-					jit_channel::msgs::Request::GetVersions(params) => {
+					LSPS2Request::GetVersions(params) => {
 						jsonrpc_object.serialize_field(JSONRPC_PARAMS_FIELD_KEY, params)?
 					}
-					jit_channel::msgs::Request::GetInfo(params) => {
+					LSPS2Request::GetInfo(params) => {
 						jsonrpc_object.serialize_field(JSONRPC_PARAMS_FIELD_KEY, params)?
 					}
-					jit_channel::msgs::Request::Buy(params) => {
+					LSPS2Request::Buy(params) => {
 						jsonrpc_object.serialize_field(JSONRPC_PARAMS_FIELD_KEY, params)?
 					}
 				}
 			}
-			LSPSMessage::LSPS2(jit_channel::msgs::Message::Response(request_id, response)) => {
+			LSPSMessage::LSPS2(LSPS2Message::Response(request_id, response)) => {
 				jsonrpc_object.serialize_field(JSONRPC_ID_FIELD_KEY, &request_id.0)?;
 
 				match response {
-					jit_channel::msgs::Response::GetVersions(result) => {
+					LSPS2Response::GetVersions(result) => {
 						jsonrpc_object.serialize_field(JSONRPC_RESULT_FIELD_KEY, result)?
 					}
-					jit_channel::msgs::Response::GetInfo(result) => {
+					LSPS2Response::GetInfo(result) => {
 						jsonrpc_object.serialize_field(JSONRPC_RESULT_FIELD_KEY, result)?
 					}
-					jit_channel::msgs::Response::GetInfoError(error) => {
+					LSPS2Response::GetInfoError(error) => {
 						jsonrpc_object.serialize_field(JSONRPC_ERROR_FIELD_KEY, error)?
 					}
-					jit_channel::msgs::Response::Buy(result) => {
+					LSPS2Response::Buy(result) => {
 						jsonrpc_object.serialize_field(JSONRPC_RESULT_FIELD_KEY, result)?
 					}
-					jit_channel::msgs::Response::BuyError(error) => {
+					LSPS2Response::BuyError(error) => {
 						jsonrpc_object.serialize_field(JSONRPC_ERROR_FIELD_KEY, error)?
 					}
 				}
@@ -272,28 +274,28 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 						LSPS0Request::ListProtocols(ListProtocolsRequest {}),
 					)))
 				}
-				jit_channel::msgs::LSPS2_GET_VERSIONS_METHOD_NAME => {
+				LSPS2_GET_VERSIONS_METHOD_NAME => {
 					let request = serde_json::from_value(params.unwrap_or(json!({})))
 						.map_err(de::Error::custom)?;
-					Ok(LSPSMessage::LSPS2(jit_channel::msgs::Message::Request(
+					Ok(LSPSMessage::LSPS2(LSPS2Message::Request(
 						RequestId(id),
-						jit_channel::msgs::Request::GetVersions(request),
+						LSPS2Request::GetVersions(request),
 					)))
 				}
-				jit_channel::msgs::LSPS2_GET_INFO_METHOD_NAME => {
+				LSPS2_GET_INFO_METHOD_NAME => {
 					let request = serde_json::from_value(params.unwrap_or(json!({})))
 						.map_err(de::Error::custom)?;
-					Ok(LSPSMessage::LSPS2(jit_channel::msgs::Message::Request(
+					Ok(LSPSMessage::LSPS2(LSPS2Message::Request(
 						RequestId(id),
-						jit_channel::msgs::Request::GetInfo(request),
+						LSPS2Request::GetInfo(request),
 					)))
 				}
-				jit_channel::msgs::LSPS2_BUY_METHOD_NAME => {
+				LSPS2_BUY_METHOD_NAME => {
 					let request = serde_json::from_value(params.unwrap_or(json!({})))
 						.map_err(de::Error::custom)?;
-					Ok(LSPSMessage::LSPS2(jit_channel::msgs::Message::Request(
+					Ok(LSPSMessage::LSPS2(LSPS2Message::Request(
 						RequestId(id),
-						jit_channel::msgs::Request::Buy(request),
+						LSPS2Request::Buy(request),
 					)))
 				}
 				_ => Err(de::Error::custom(format!(
@@ -320,47 +322,47 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 							Err(de::Error::custom("Received invalid JSON-RPC object: one of method, result, or error required"))
 						}
 					}
-					jit_channel::msgs::LSPS2_GET_VERSIONS_METHOD_NAME => {
+					LSPS2_GET_VERSIONS_METHOD_NAME => {
 						if let Some(result) = result {
 							let response =
 								serde_json::from_value(result).map_err(de::Error::custom)?;
-							Ok(LSPSMessage::LSPS2(jit_channel::msgs::Message::Response(
+							Ok(LSPSMessage::LSPS2(LSPS2Message::Response(
 								RequestId(id),
-								jit_channel::msgs::Response::GetVersions(response),
+								LSPS2Response::GetVersions(response),
 							)))
 						} else {
-							Err(de::Error::custom("Received invalid lsps2.getversions response."))
+							Err(de::Error::custom("Received invalid lsps2.get_versions response."))
 						}
 					}
-					jit_channel::msgs::LSPS2_GET_INFO_METHOD_NAME => {
+					LSPS2_GET_INFO_METHOD_NAME => {
 						if let Some(error) = error {
-							Ok(LSPSMessage::LSPS2(jit_channel::msgs::Message::Response(
+							Ok(LSPSMessage::LSPS2(LSPS2Message::Response(
 								RequestId(id),
-								jit_channel::msgs::Response::GetInfoError(error),
+								LSPS2Response::GetInfoError(error),
 							)))
 						} else if let Some(result) = result {
 							let response =
 								serde_json::from_value(result).map_err(de::Error::custom)?;
-							Ok(LSPSMessage::LSPS2(jit_channel::msgs::Message::Response(
+							Ok(LSPSMessage::LSPS2(LSPS2Message::Response(
 								RequestId(id),
-								jit_channel::msgs::Response::GetInfo(response),
+								LSPS2Response::GetInfo(response),
 							)))
 						} else {
 							Err(de::Error::custom("Received invalid JSON-RPC object: one of method, result, or error required"))
 						}
 					}
-					jit_channel::msgs::LSPS2_BUY_METHOD_NAME => {
+					LSPS2_BUY_METHOD_NAME => {
 						if let Some(error) = error {
-							Ok(LSPSMessage::LSPS2(jit_channel::msgs::Message::Response(
+							Ok(LSPSMessage::LSPS2(LSPS2Message::Response(
 								RequestId(id),
-								jit_channel::msgs::Response::BuyError(error),
+								LSPS2Response::BuyError(error),
 							)))
 						} else if let Some(result) = result {
 							let response =
 								serde_json::from_value(result).map_err(de::Error::custom)?;
-							Ok(LSPSMessage::LSPS2(jit_channel::msgs::Message::Response(
+							Ok(LSPSMessage::LSPS2(LSPS2Message::Response(
 								RequestId(id),
-								jit_channel::msgs::Response::Buy(response),
+								LSPS2Response::Buy(response),
 							)))
 						} else {
 							Err(de::Error::custom("Received invalid JSON-RPC object: one of method, result, or error required"))

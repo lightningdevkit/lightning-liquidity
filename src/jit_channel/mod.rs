@@ -1,4 +1,4 @@
-// This file is Copyright its original authors, visible in version contror
+// This file is Copyright its original authors, visible in version control
 // history.
 //
 // This file is licensed under the Apache License, Version 2.0 <LICENSE-APACHE
@@ -7,8 +7,13 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
-//! Types and primitives that implement the LSPS3: JIT Channel Negotiation specification.
-pub mod channel_manager;
-pub mod event;
+//! Implementation of LSPS2: JIT Channel Negotiation specification.
+
+pub(crate) mod channel_manager;
+pub(crate) mod event;
+/// Message, request, and other primitive types used to implement LSPS2.
 pub mod msgs;
-pub mod scid_utils;
+pub(crate) mod utils;
+
+pub use event::LSPS2Event;
+pub use msgs::{BuyResponse, GetInfoResponse, OpeningFeeParams, RawOpeningFeeParams};

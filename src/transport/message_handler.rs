@@ -50,34 +50,38 @@ pub(crate) trait ProtocolMessageHandler {
 /// Allows end-user to configure options when using the [`LiquidityManager`]
 /// to provide liquidity services to clients.
 pub struct LiquidityProviderConfig {
-	/// Optional configuration for jit channels
-	/// should you want to support them
+	/// Optional configuration for JIT channels
+	/// should you want to support them.
 	pub jit_channels: Option<JITChannelsConfig>,
 }
 
-/// Configuration options for jit channels
-/// A configuration used for the creation of Just In Time Channels.
+/// Configuration options for JIT channels.
 pub struct JITChannelsConfig {
-	/// Used to calculate the promise for channel parameters supplied to clients
+	/// Used to calculate the promise for channel parameters supplied to clients.
 	///
-	/// Note: If this changes then old promises given out will be considered invalid
+	/// Note: If this changes then old promises given out will be considered invalid.
 	pub promise_secret: [u8; 32],
 }
 
 /// The main interface into LSP functionality.
 ///
 /// Should be used as a [`CustomMessageHandler`] for your
-/// [`lightning::ln::peer_handler::PeerManager`]'s [`lightning::ln::peer_handler::MessageHandler`].
+/// [`PeerManager`]'s [`MessageHandler`].
 ///
-/// Should provide a reference to your [`lightning::ln::peer_handler::PeerManager`] by calling
-/// [`LiquidityManager::set_peer_manager()`] post construction.  This allows the [`LiquidityManager`] to
-/// wake the [`lightning::ln::peer_handler::PeerManager`] when there are pending messages to be sent.
+/// Should provide a reference to your [`PeerManager`] by calling
+/// [`LiquidityManager::set_peer_manager`] post construction.  This allows the [`LiquidityManager`] to
+/// wake the [`PeerManager`] when there are pending messages to be sent.
 ///
-/// Users need to continually poll [`LiquidityManager::get_and_clear_pending_events()`] in order to surface
+/// Users need to continually poll [`LiquidityManager::get_and_clear_pending_events`] in order to surface
 /// [`Event`]'s that likely need to be handled.
 ///
-/// Users must forward the [`lightning::events::Event::HTLCIntercepted`] event parameters to [`LiquidityManager::htlc_intercepted()`]
-/// and the [`lightning::events::Event::ChannelReady`] event parameters to [`LiquidityManager::channel_ready()`].
+/// Users must forward the [`Event::HTLCIntercepted`] event parameters to [`LiquidityManager::htlc_intercepted`]
+/// and the [`Event::ChannelReady`] event parameters to [`LiquidityManager::channel_ready`].
+///
+/// [`PeerManager`]: lightning::ln::peer_handler::PeerManager
+/// [`MessageHandler`]: lightning::ln::peer_handler::MessageHandler
+/// [`Event::HTLCIntercepted`]: lightning::events::Event::HTLCIntercepted
+/// [`Event::ChannelReady`]: lightning::events::Event::ChannelReady
 pub struct LiquidityManager<
 	ES: Deref + Clone,
 	M: Deref,
@@ -152,7 +156,7 @@ where
 	NS::Target: NodeSigner,
 	C::Target: Filter,
 {
-	/// Constructor for the ['LiquidityManager']
+	/// Constructor for the [`LiquidityManager`].
 	///
 	/// Sets up the required protocol message handlers based on the given [`LiquidityProviderConfig`].
 	pub fn new(
@@ -193,27 +197,29 @@ where {
 		}
 	}
 
-	/// Blocks until next event is ready and returns it
+	/// Blocks until next event is ready and returns it.
 	///
-	/// Typically you would spawn a thread or task that calls this in a loop
+	/// Typically you would spawn a thread or task that calls this in a loop.
 	pub fn wait_next_event(&self) -> Event {
 		self.pending_events.wait_next_event()
 	}
 
-	/// Returns and clears all events without blocking
+	/// Returns and clears all events without blocking.
 	///
-	/// Typically you would spawn a thread or task that calls this in a loop
+	/// Typically you would spawn a thread or task that calls this in a loop.
 	pub fn get_and_clear_pending_events(&self) -> Vec<Event> {
 		self.pending_events.get_and_clear_pending_events()
 	}
 
-	/// Set a [`lightning::ln::peer_handler::PeerManager`] reference for the message handlers
+	/// Set a [`PeerManager`] reference for the message handlers.
 	///
-	/// This allows the message handlers to wake the [`lightning::ln::peer_handler::PeerManager`] by calling
-	/// [`lightning::ln::peer_handler::PeerManager::process_events()`] after enqueing messages to be sent.
+	/// This allows the message handlers to wake the [`PeerManager`] by calling
+	/// [`PeerManager::process_events`] after enqueing messages to be sent.
 	///
 	/// Without this the messages will be sent based on whatever polling interval
 	/// your background processor uses.
+	///
+	/// [`PeerManager`]: lightning::ln::peer_handler::PeerManager
 	pub fn set_peer_manager(
 		&self, peer_manager: Arc<PeerManager<Descriptor, CM, RM, OM, L, CMH, NS>>,
 	) {
@@ -227,15 +233,15 @@ where {
 	///
 	/// `counterparty_node_id` is the node_id of the LSP you would like to use.
 	///
-	/// if `payment_size_msat` is [`Option::Some`] then the invoice will be for a fixed amount
+	/// If `payment_size_msat` is [`Option::Some`] then the invoice will be for a fixed amount
 	/// and MPP can be used to pay it.
 	///
-	/// if `payment_size_msat` is [`Option::None`] then the invoice can be for an arbitrary amount
+	/// If `payment_size_msat` is [`Option::None`] then the invoice can be for an arbitrary amount
 	/// but MPP can no longer be used to pay it.
 	///
 	/// `token` is an optional String that will be provided to the LSP.
-	/// it can be used by the LSP as an API key, coupon code, or some other way to identify a user.
-	pub fn create_invoice(
+	/// It can be used by the LSP as an API key, coupon code, or some other way to identify a user.
+	pub fn jit_channel_create_invoice(
 		&self, counterparty_node_id: PublicKey, payment_size_msat: Option<u64>,
 		token: Option<String>, user_channel_id: u128,
 	) -> Result<(), APIError> {
@@ -257,7 +263,9 @@ where {
 
 	/// Used by LSP to provide fee parameters to a client requesting a JIT Channel.
 	///
-	/// Should be called in response to receiving a [`crate::JITChannelEvent::GetInfo`] event.
+	/// Should be called in response to receiving a [`LSPS2Event::GetInfo`] event.
+	///
+	/// [`LSPS2Event::GetInfo`]: crate::jit_channel::LSPS2Event::GetInfo
 	pub fn opening_fee_params_generated(
 		&self, counterparty_node_id: PublicKey, request_id: RequestId,
 		opening_fee_params_menu: Vec<RawOpeningFeeParams>, min_payment_size_msat: u64,
@@ -280,8 +288,12 @@ where {
 	}
 
 	/// Used by client to confirm which channel parameters to use for the JIT Channel buy request.
+	/// The client agrees to paying an opening fee equal to
+	/// `max(min_fee_msat, proportional*(payment_size_msat/1_000_000))`.
 	///
-	/// Should be called in response to receiving a [`crate::JITChannelEvent::GetInfoResponse`] event.
+	/// Should be called in response to receiving a [`LSPS2Event::GetInfoResponse`] event.
+	///
+	/// [`LSPS2Event::GetInfoResponse`]: crate::jit_channel::LSPS2Event::GetInfoResponse
 	pub fn opening_fee_params_selected(
 		&self, counterparty_node_id: PublicKey, channel_id: u128,
 		opening_fee_params: OpeningFeeParams,
@@ -300,9 +312,11 @@ where {
 		}
 	}
 
-	/// Used by LSP to provide client with the scid and cltv_expiry_delta to use in their invoice
+	/// Used by LSP to provide client with the scid and cltv_expiry_delta to use in their invoice.
 	///
-	/// Should be called in response to receiving a [`crate::JITChannelEvent::BuyRequest`] event.
+	/// Should be called in response to receiving a [`LSPS2Event::BuyRequest`] event.
+	///
+	/// [`LSPS2Event::BuyRequest`]: crate::jit_channel::LSPS2Event::BuyRequest
 	pub fn invoice_parameters_generated(
 		&self, counterparty_node_id: PublicKey, request_id: RequestId, scid: u64,
 		cltv_expiry_delta: u32, client_trusts_lsp: bool,
@@ -323,15 +337,18 @@ where {
 		}
 	}
 
-	/// Forward [`lightning::events::Event::HTLCIntercepted`] event parameters into this function.
+	/// Forward [`Event::HTLCIntercepted`] event parameters into this function.
 	///
 	/// Will fail the intercepted HTLC if the scid matches a payment we are expecting
 	/// but the payment amount is incorrect or the expiry has passed.
 	///
-	/// Will generate a [`crate::JITChannelEvent::OpenChannel`] event if the scid matches a payment we are expected
+	/// Will generate a [`LSPS2Event::OpenChannel`] event if the scid matches a payment we are expected
 	/// and the payment amount is correct and the offer has not expired.
 	///
 	/// Will do nothing if the scid does not match any of the ones we gave out.
+	///
+	/// [`Event::HTLCIntercepted`]: lightning::events::Event::HTLCIntercepted
+	/// [`LSPS2Event::OpenChannel`]: crate::jit_channel::LSPS2Event::OpenChannel
 	pub fn htlc_intercepted(
 		&self, scid: u64, intercept_id: InterceptId, inbound_amount_msat: u64,
 		expected_outbound_amount_msat: u64,
@@ -348,10 +365,12 @@ where {
 		Ok(())
 	}
 
-	/// Forward [`lightning::events::Event::ChannelReady`] event parameters into this function.
+	/// Forward [`Event::ChannelReady`] event parameters into this function.
 	///
 	/// Will forward the intercepted HTLC if it matches a channel
 	/// we need to forward a payment over otherwise it will be ignored.
+	///
+	/// [`Event::ChannelReady`]: lightning::events::Event::ChannelReady
 	pub fn channel_ready(
 		&self, user_channel_id: u128, channel_id: &ChannelId, counterparty_node_id: &PublicKey,
 	) -> Result<(), APIError> {

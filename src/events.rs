@@ -11,7 +11,9 @@
 //! by the end-user.
 //!
 //! Because we don't have a built-in runtime, it's up to the end-user to poll
-//! [`crate::LiquidityManager::get_and_clear_pending_events()`] to receive events.
+//! [`LiquidityManager::get_and_clear_pending_events`] to receive events.
+//!
+//! [`LiquidityManager::get_and_clear_pending_events`]: crate::LiquidityManager::get_and_clear_pending_events
 use crate::jit_channel;
 use std::collections::VecDeque;
 use std::sync::{Condvar, Mutex};
@@ -56,6 +58,6 @@ impl EventQueue {
 /// An event which you should probably take some action in response to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
-	/// A LSPS2 (JIT Channel) protocol event
-	LSPS2(jit_channel::event::Event),
+	/// An LSPS2 (JIT Channel) protocol event.
+	LSPS2(jit_channel::LSPS2Event),
 }
