@@ -35,8 +35,6 @@ jobs:
           cargo update -p quote --precise "1.0.30" --verbose
           # The proc-macro2 crate switched to Rust edition 2021 starting with v1.0.66, i.e., has MSRV of 1.56
           cargo update -p proc-macro2 --precise "1.0.65" --verbose
-          # The memchr crate switched to Rust edition 2021 starting with v2.6.0
-          cargo update -p memchr --precise "2.5.0" --verbose
       - name: Cargo check
         run: cargo check --release
       - name: Check documentation
