@@ -2,6 +2,9 @@ use bitcoin::hashes::hmac::{Hmac, HmacEngine};
 use bitcoin::hashes::sha256::Hash as Sha256;
 use bitcoin::hashes::{Hash, HashEngine};
 
+use std::convert::TryInto;
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use crate::jit_channel::msgs::OpeningFeeParams;
 use crate::utils;
 
@@ -9,7 +12,16 @@ use crate::utils;
 pub fn is_valid_opening_fee_params(
 	fee_params: &OpeningFeeParams, promise_secret: &[u8; 32],
 ) -> bool {
-	if chrono::Utc::now() > fee_params.valid_until {
+	let seconds_since_epoch = SystemTime::now()
+		.duration_since(UNIX_EPOCH)
+		.expect("system clock to be ahead of the unix epoch")
+		.as_secs();
+	let valid_until_seconds_since_epoch = fee_params
+		.valid_until
+		.timestamp()
+		.try_into()
+		.expect("expiration to be ahead of unix epoch");
+	if seconds_since_epoch > valid_until_seconds_since_epoch {
 		return false;
 	}
 
