@@ -6,10 +6,13 @@ use crate::jit_channel::msgs::OpeningFeeParams;
 use crate::utils;
 
 /// Determines if the given parameters are valid given the secret used to generate the promise.
-// TODO: add validation check that valid_until >= now()
 pub fn is_valid_opening_fee_params(
 	fee_params: &OpeningFeeParams, promise_secret: &[u8; 32],
 ) -> bool {
+	if chrono::Utc::now() > fee_params.valid_until {
+		return false;
+	}
+
 	let mut hmac = HmacEngine::<Sha256>::new(promise_secret);
 	hmac.input(&fee_params.min_fee_msat.to_be_bytes());
 	hmac.input(&fee_params.proportional.to_be_bytes());

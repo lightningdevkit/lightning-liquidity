@@ -229,7 +229,7 @@ mod tests {
 		let min_fee_msat = 100;
 		let proportional = 21;
 		let valid_until: chrono::DateTime<Utc> =
-			chrono::DateTime::parse_from_rfc3339("2023-05-20T08:30:45Z").unwrap().into();
+			chrono::DateTime::parse_from_rfc3339("2035-05-20T08:30:45Z").unwrap().into();
 		let min_lifetime = 144;
 		let max_client_to_self_delay = 128;
 
@@ -258,7 +258,7 @@ mod tests {
 	fn changing_single_field_produced_invalid_params() {
 		let min_fee_msat = 100;
 		let proportional = 21;
-		let valid_until = chrono::DateTime::parse_from_rfc3339("2023-05-20T08:30:45Z").unwrap();
+		let valid_until = chrono::DateTime::parse_from_rfc3339("2035-05-20T08:30:45Z").unwrap();
 		let min_lifetime = 144;
 		let max_client_to_self_delay = 128;
 
@@ -281,7 +281,7 @@ mod tests {
 	fn wrong_secret_produced_invalid_params() {
 		let min_fee_msat = 100;
 		let proportional = 21;
-		let valid_until = chrono::DateTime::parse_from_rfc3339("2023-05-20T08:30:45Z").unwrap();
+		let valid_until = chrono::DateTime::parse_from_rfc3339("2035-05-20T08:30:45Z").unwrap();
 		let min_lifetime = 144;
 		let max_client_to_self_delay = 128;
 
@@ -297,6 +297,28 @@ mod tests {
 		let other_secret = [2u8; 32];
 
 		let opening_fee_params = raw.into_opening_fee_params(&promise_secret);
-		assert!(is_valid_opening_fee_params(&opening_fee_params, &promise_secret));
+		assert!(!is_valid_opening_fee_params(&opening_fee_params, &other_secret));
+	}
+
+	#[test]
+	fn expired_params_produces_invalid_params() {
+		let min_fee_msat = 100;
+		let proportional = 21;
+		let valid_until = chrono::DateTime::parse_from_rfc3339("2023-05-20T08:30:45Z").unwrap();
+		let min_lifetime = 144;
+		let max_client_to_self_delay = 128;
+
+		let raw = RawOpeningFeeParams {
+			min_fee_msat,
+			proportional,
+			valid_until: valid_until.into(),
+			min_lifetime,
+			max_client_to_self_delay,
+		};
+
+		let promise_secret = [1u8; 32];
+
+		let opening_fee_params = raw.into_opening_fee_params(&promise_secret);
+		assert!(!is_valid_opening_fee_params(&opening_fee_params, &promise_secret));
 	}
 }
