@@ -934,7 +934,26 @@ where
 	fn handle_buy_request(
 		&self, request_id: RequestId, counterparty_node_id: &PublicKey, params: BuyRequest,
 	) -> Result<(), LightningError> {
-		// TODO: need to perform check on `params.version`.
+		if !SUPPORTED_SPEC_VERSIONS.contains(&params.version) {
+			let mut pending_messages = self.pending_messages.lock().unwrap();
+			pending_messages.push((
+				*counterparty_node_id,
+				LSPS2Message::Response(
+					request_id,
+					LSPS2Response::BuyError(ResponseError {
+						code: 1,
+						message: format!("version {} is not supported", params.version),
+						data: Some(format!("Supported versions are {:?}", SUPPORTED_SPEC_VERSIONS)),
+					}),
+				)
+				.into(),
+			));
+
+			return Err(LightningError {
+				err: format!("client requested unsupported version {}", params.version),
+				action: ErrorAction::IgnoreAndLog(Level::Info),
+			});
+		}
 		// TODO: if payment_size_msat is specified, make sure opening_fee is >= payment_size_msat.
 		// TODO: if payment_size_msat is specified, make sure opening_fee does not hit overflow error.
 		// TODO: if payment_size_msat is specified, make sure our node has sufficient incoming liquidity from public network to receive it.
