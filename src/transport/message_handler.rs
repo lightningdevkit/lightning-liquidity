@@ -61,6 +61,10 @@ pub struct JITChannelsConfig {
 	///
 	/// Note: If this changes then old promises given out will be considered invalid.
 	pub promise_secret: [u8; 32],
+	/// The minimum payment size you are willing to accept.
+	pub min_payment_size_msat: u64,
+	/// The maximum payment size you are willing to accept.
+	pub max_payment_size_msat: u64,
 }
 
 /// The main interface into LSP functionality.
@@ -175,7 +179,7 @@ where {
 			config.jit_channels.as_ref().map(|jit_channels_config| {
 				JITChannelManager::new(
 					entropy_source.clone(),
-					jit_channels_config.promise_secret,
+					jit_channels_config,
 					Arc::clone(&pending_messages),
 					Arc::clone(&pending_events),
 					Arc::clone(&channel_manager),
@@ -268,16 +272,13 @@ where {
 	/// [`LSPS2Event::GetInfo`]: crate::jit_channel::LSPS2Event::GetInfo
 	pub fn opening_fee_params_generated(
 		&self, counterparty_node_id: PublicKey, request_id: RequestId,
-		opening_fee_params_menu: Vec<RawOpeningFeeParams>, min_payment_size_msat: u64,
-		max_payment_size_msat: u64,
+		opening_fee_params_menu: Vec<RawOpeningFeeParams>,
 	) -> Result<(), APIError> {
 		if let Some(lsps2_message_handler) = &self.lsps2_message_handler {
 			lsps2_message_handler.opening_fee_params_generated(
 				counterparty_node_id,
 				request_id,
 				opening_fee_params_menu,
-				min_payment_size_msat,
-				max_payment_size_msat,
 			)
 		} else {
 			Err(APIError::APIMisuseError {

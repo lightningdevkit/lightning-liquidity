@@ -31,13 +31,16 @@ use crate::jit_channel::utils::{compute_opening_fee, is_valid_opening_fee_params
 use crate::jit_channel::LSPS2Event;
 use crate::transport::message_handler::ProtocolMessageHandler;
 use crate::transport::msgs::{LSPSMessage, RequestId};
-use crate::utils;
 use crate::{events::Event, transport::msgs::ResponseError};
+use crate::{utils, JITChannelsConfig};
 
 use crate::jit_channel::msgs::{
 	BuyRequest, BuyResponse, GetInfoRequest, GetInfoResponse, GetVersionsRequest,
 	GetVersionsResponse, JitChannelScid, LSPS2Message, LSPS2Request, LSPS2Response,
-	OpeningFeeParams, RawOpeningFeeParams,
+	OpeningFeeParams, RawOpeningFeeParams, LSPS2_BUY_REQUEST_INVALID_OPENING_FEE_PARAMS_ERROR_CODE,
+	LSPS2_BUY_REQUEST_INVALID_VERSION_ERROR_CODE,
+	LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_LARGE_ERROR_CODE,
+	LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_SMALL_ERROR_CODE,
 };
 
 const SUPPORTED_SPEC_VERSIONS: [u16; 1] = [1];
@@ -377,6 +380,8 @@ pub struct JITChannelManager<
 	per_peer_state: RwLock<HashMap<PublicKey, Mutex<PeerState>>>,
 	peer_by_scid: RwLock<HashMap<u64, PublicKey>>,
 	promise_secret: [u8; 32],
+	min_payment_size_msat: u64,
+	max_payment_size_msat: u64,
 }
 
 impl<
@@ -409,14 +414,16 @@ where
 	NS::Target: NodeSigner,
 {
 	pub(crate) fn new(
-		entropy_source: ES, promise_secret: [u8; 32],
+		entropy_source: ES, config: &JITChannelsConfig,
 		pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
 		pending_events: Arc<EventQueue>,
 		channel_manager: Arc<ChannelManager<M, T, ES, NS, SP, F, R, L>>,
 	) -> Self {
 		Self {
 			entropy_source,
-			promise_secret,
+			promise_secret: config.promise_secret,
+			min_payment_size_msat: config.min_payment_size_msat,
+			max_payment_size_msat: config.max_payment_size_msat,
 			pending_messages,
 			pending_events,
 			per_peer_state: RwLock::new(HashMap::new()),
@@ -466,8 +473,7 @@ where
 
 	pub fn opening_fee_params_generated(
 		&self, counterparty_node_id: PublicKey, request_id: RequestId,
-		opening_fee_params_menu: Vec<RawOpeningFeeParams>, min_payment_size_msat: u64,
-		max_payment_size_msat: u64,
+		opening_fee_params_menu: Vec<RawOpeningFeeParams>,
 	) -> Result<(), APIError> {
 		let outer_state_lock = self.per_peer_state.read().unwrap();
 
@@ -482,8 +488,8 @@ where
 								.into_iter()
 								.map(|param| param.into_opening_fee_params(&self.promise_secret))
 								.collect(),
-							min_payment_size_msat,
-							max_payment_size_msat,
+							min_payment_size_msat: self.min_payment_size_msat,
+							max_payment_size_msat: self.max_payment_size_msat,
 						});
 						self.enqueue_response(counterparty_node_id, request_id, response);
 						Ok(())
@@ -935,47 +941,130 @@ where
 		&self, request_id: RequestId, counterparty_node_id: &PublicKey, params: BuyRequest,
 	) -> Result<(), LightningError> {
 		if !SUPPORTED_SPEC_VERSIONS.contains(&params.version) {
-			let mut pending_messages = self.pending_messages.lock().unwrap();
-			pending_messages.push((
+			self.enqueue_response(
 				*counterparty_node_id,
-				LSPS2Message::Response(
-					request_id,
-					LSPS2Response::BuyError(ResponseError {
-						code: 1,
-						message: format!("version {} is not supported", params.version),
-						data: Some(format!("Supported versions are {:?}", SUPPORTED_SPEC_VERSIONS)),
-					}),
-				)
-				.into(),
-			));
-
+				request_id,
+				LSPS2Response::BuyError(ResponseError {
+					code: LSPS2_BUY_REQUEST_INVALID_VERSION_ERROR_CODE,
+					message: format!("version {} is not supported", params.version),
+					data: Some(format!("Supported versions are {:?}", SUPPORTED_SPEC_VERSIONS)),
+				}),
+			);
 			return Err(LightningError {
 				err: format!("client requested unsupported version {}", params.version),
 				action: ErrorAction::IgnoreAndLog(Level::Info),
 			});
 		}
-		// TODO: if payment_size_msat is specified, make sure opening_fee is >= payment_size_msat.
-		// TODO: if payment_size_msat is specified, make sure opening_fee does not hit overflow error.
+
+		if let Some(payment_size_msat) = params.payment_size_msat {
+			if payment_size_msat < self.min_payment_size_msat {
+				self.enqueue_response(
+					*counterparty_node_id,
+					request_id,
+					LSPS2Response::BuyError(ResponseError {
+						code: LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_SMALL_ERROR_CODE,
+						message: "payment size is below our minimum supported payment size"
+							.to_string(),
+						data: None,
+					}),
+				);
+				return Err(LightningError {
+					err: "payment size is below our minimum supported payment size".to_string(),
+					action: ErrorAction::IgnoreAndLog(Level::Info),
+				});
+			}
+
+			if payment_size_msat > self.max_payment_size_msat {
+				self.enqueue_response(
+					*counterparty_node_id,
+					request_id,
+					LSPS2Response::BuyError(ResponseError {
+						code: LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_LARGE_ERROR_CODE,
+						message: "payment size is above our maximum supported payment size"
+							.to_string(),
+						data: None,
+					}),
+				);
+				return Err(LightningError {
+					err: "payment size is above our maximum supported payment size".to_string(),
+					action: ErrorAction::IgnoreAndLog(Level::Info),
+				});
+			}
+
+			match compute_opening_fee(
+				payment_size_msat,
+				params.opening_fee_params.min_fee_msat,
+				params.opening_fee_params.proportional,
+			) {
+				Some(opening_fee) => {
+					if opening_fee >= payment_size_msat {
+						self.enqueue_response(
+							*counterparty_node_id,
+							request_id,
+							LSPS2Response::BuyError(ResponseError {
+								code: LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_SMALL_ERROR_CODE,
+								message: "payment size is too small to cover the opening fee"
+									.to_string(),
+								data: None,
+							}),
+						);
+						return Err(LightningError {
+							err: "payment size is too small to cover the opening fee".to_string(),
+							action: ErrorAction::IgnoreAndLog(Level::Info),
+						});
+					}
+				}
+				None => {
+					self.enqueue_response(
+						*counterparty_node_id,
+						request_id,
+						LSPS2Response::BuyError(ResponseError {
+							code: LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_LARGE_ERROR_CODE,
+							message: "overflow error when calculating opening_fee".to_string(),
+							data: None,
+						}),
+					);
+					return Err(LightningError {
+						err: "overflow error when calculating opening_fee".to_string(),
+						action: ErrorAction::IgnoreAndLog(Level::Info),
+					});
+				}
+			}
+		}
+
 		// TODO: if payment_size_msat is specified, make sure our node has sufficient incoming liquidity from public network to receive it.
 
-		if is_valid_opening_fee_params(&params.opening_fee_params, &self.promise_secret) {
-			let mut outer_state_lock = self.per_peer_state.write().unwrap();
-			let inner_state_lock = outer_state_lock
-				.entry(*counterparty_node_id)
-				.or_insert(Mutex::new(PeerState::default()));
-			let peer_state = inner_state_lock.get_mut().unwrap();
-			peer_state
-				.pending_requests
-				.insert(request_id.clone(), LSPS2Request::Buy(params.clone()));
-
-			self.enqueue_event(Event::LSPS2(LSPS2Event::BuyRequest {
+		if !is_valid_opening_fee_params(&params.opening_fee_params, &self.promise_secret) {
+			self.enqueue_response(
+				*counterparty_node_id,
 				request_id,
-				version: params.version,
-				counterparty_node_id: *counterparty_node_id,
-				opening_fee_params: params.opening_fee_params,
-				payment_size_msat: params.payment_size_msat,
-			}));
+				LSPS2Response::BuyError(ResponseError {
+					code: LSPS2_BUY_REQUEST_INVALID_OPENING_FEE_PARAMS_ERROR_CODE,
+					message: "valid_until is already past OR the promise did not match the provided parameters".to_string(),
+					data: None,
+				}),
+			);
+			return Err(LightningError {
+				err: "invalid opening fee parameters were supplied by client".to_string(),
+				action: ErrorAction::IgnoreAndLog(Level::Info),
+			});
 		}
+
+		let mut outer_state_lock = self.per_peer_state.write().unwrap();
+		let inner_state_lock = outer_state_lock
+			.entry(*counterparty_node_id)
+			.or_insert(Mutex::new(PeerState::default()));
+		let peer_state = inner_state_lock.get_mut().unwrap();
+		peer_state.pending_requests.insert(request_id.clone(), LSPS2Request::Buy(params.clone()));
+
+		self.enqueue_event(Event::LSPS2(LSPS2Event::BuyRequest {
+			request_id,
+			version: params.version,
+			counterparty_node_id: *counterparty_node_id,
+			opening_fee_params: params.opening_fee_params,
+			payment_size_msat: params.payment_size_msat,
+		}));
+
 		Ok(())
 	}
 
