@@ -110,10 +110,6 @@ pub enum LSPS2Event {
 	OpenChannel {
 		/// The node to open channel with.
 		their_network_key: PublicKey,
-		/// The intercepted HTLC amount in msats.
-		inbound_amount_msat: u64,
-		/// The amount the client expects to receive before fees are taken out.
-		expected_outbound_amount_msat: u64,
 		/// The amount to forward after fees.
 		amt_to_forward_msat: u64,
 		/// The fee earned for opening the channel.
