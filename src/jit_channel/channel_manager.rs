@@ -41,6 +41,7 @@ use crate::jit_channel::msgs::{
 	LSPS2_BUY_REQUEST_INVALID_VERSION_ERROR_CODE,
 	LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_LARGE_ERROR_CODE,
 	LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_SMALL_ERROR_CODE,
+	LSPS2_GET_INFO_REQUEST_INVALID_VERSION_ERROR_CODE,
 };
 
 const SUPPORTED_SPEC_VERSIONS: [u16; 1] = [1];
@@ -875,6 +876,22 @@ where
 	fn handle_get_info_request(
 		&self, request_id: RequestId, counterparty_node_id: &PublicKey, params: GetInfoRequest,
 	) -> Result<(), LightningError> {
+		if !SUPPORTED_SPEC_VERSIONS.contains(&params.version) {
+			self.enqueue_response(
+				*counterparty_node_id,
+				request_id,
+				LSPS2Response::GetInfoError(ResponseError {
+					code: LSPS2_GET_INFO_REQUEST_INVALID_VERSION_ERROR_CODE,
+					message: format!("version {} is not supported", params.version),
+					data: Some(format!("Supported versions are {:?}", SUPPORTED_SPEC_VERSIONS)),
+				}),
+			);
+			return Err(LightningError {
+				err: format!("client requested unsupported version {}", params.version),
+				action: ErrorAction::IgnoreAndLog(Level::Info),
+			});
+		}
+
 		let mut outer_state_lock = self.per_peer_state.write().unwrap();
 		let inner_state_lock: &mut Mutex<PeerState> = outer_state_lock
 			.entry(*counterparty_node_id)
