@@ -1,10 +1,10 @@
+use crate::channel_request::msgs::{
+	LSPS1Message, LSPS1Request, LSPS1Response, LSPS1_CREATE_ORDER_METHOD_NAME,
+	LSPS1_GET_INFO_METHOD_NAME, LSPS1_GET_ORDER_METHOD_NAME,
+};
 use crate::jit_channel::msgs::{
 	LSPS2Message, LSPS2Request, LSPS2Response, LSPS2_BUY_METHOD_NAME, LSPS2_GET_INFO_METHOD_NAME,
 	LSPS2_GET_VERSIONS_METHOD_NAME,
-};
-use crate::channel_request::msgs::{
-	LSPS1Message, LSPS1Request, LSPS1Response, LSPS1_CREATE_ORDER_METHOD_NAME, LSPS1_GET_INFO_METHOD_NAME,
-	LSPS1_GET_ORDER_METHOD_NAME,
 };
 use lightning::impl_writeable_msg;
 use lightning::ln::wire;

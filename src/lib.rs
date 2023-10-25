@@ -24,6 +24,7 @@ pub mod jit_channel;
 mod transport;
 mod utils;
 
+pub use channel_request::event::Event as LSPS1Event;
 pub use transport::message_handler::{
 	JITChannelsConfig, LiquidityManager, LiquidityProviderConfig,
 };
