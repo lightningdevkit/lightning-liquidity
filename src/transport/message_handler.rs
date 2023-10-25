@@ -2,7 +2,7 @@ use crate::events::{Event, EventQueue};
 use crate::jit_channel::channel_manager::JITChannelManager;
 use crate::jit_channel::msgs::{OpeningFeeParams, RawOpeningFeeParams};
 use crate::transport::msgs::RequestId;
-use crate::transport::msgs::{LSPSMessage, RawLSPSMessage, LSPS_MESSAGE_TYPE_ID};
+use crate::transport::msgs::{LSPSMessage, RawLSPSMessage, LSPS_MESSAGE_TYPE_ID_ID};
 use crate::transport::protocol::LSPS0MessageHandler;
 
 use lightning::chain::chaininterface::{BroadcasterInterface, FeeEstimator};
@@ -404,6 +404,15 @@ where {
 					return Err(LightningError { err: format!("Received LSPS2 message without LSPS2 message handler configured. From node = {:?}", sender_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
 				}
 			},
+			_ => {
+				return Err(LightningError {
+					err: format!(
+						"Received message without message handler configured. From node = {:?}",
+						sender_node_id
+					),
+					action: ErrorAction::IgnoreAndLog(Level::Info),
+				});
+			}
 		}
 		Ok(())
 	}
