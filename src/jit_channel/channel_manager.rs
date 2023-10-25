@@ -42,6 +42,7 @@ use crate::jit_channel::msgs::{
 	LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_LARGE_ERROR_CODE,
 	LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_SMALL_ERROR_CODE,
 	LSPS2_GET_INFO_REQUEST_INVALID_VERSION_ERROR_CODE,
+	LSPS2_GET_INFO_REQUEST_UNRECOGNIZED_OR_STALE_TOKEN_ERROR_CODE,
 };
 
 const SUPPORTED_SPEC_VERSIONS: [u16; 1] = [1];
@@ -514,6 +515,39 @@ where
 
 		if let Some(peer_manager) = self.peer_manager.lock().unwrap().as_ref() {
 			peer_manager.process_events();
+		}
+	}
+
+	pub fn invalid_token_provided(
+		&self, counterparty_node_id: PublicKey, request_id: RequestId,
+	) -> Result<(), APIError> {
+		let outer_state_lock = self.per_peer_state.read().unwrap();
+
+		match outer_state_lock.get(&counterparty_node_id) {
+			Some(inner_state_lock) => {
+				let mut peer_state = inner_state_lock.lock().unwrap();
+
+				match peer_state.pending_requests.remove(&request_id) {
+					Some(LSPS2Request::GetInfo(_)) => {
+						let response = LSPS2Response::GetInfoError(ResponseError {
+							code: LSPS2_GET_INFO_REQUEST_UNRECOGNIZED_OR_STALE_TOKEN_ERROR_CODE,
+							message: "an unrecognized or stale token was provided".to_string(),
+							data: None,
+						});
+						self.enqueue_response(counterparty_node_id, request_id, response);
+						Ok(())
+					}
+					_ => Err(APIError::APIMisuseError {
+						err: format!(
+							"No pending get_info request for request_id: {:?}",
+							request_id
+						),
+					}),
+				}
+			}
+			None => Err(APIError::APIMisuseError {
+				err: format!("No state for the counterparty exists: {:?}", counterparty_node_id),
+			}),
 		}
 	}
 

@@ -20,7 +20,11 @@ pub enum LSPS2Event {
 	/// You must calculate the parameters for this client and pass them to
 	/// [`LiquidityManager::opening_fee_params_generated`].
 	///
+	/// If an unrecognized or stale token is provided you can use
+	/// `[LiquidityManager::invalid_token_provided`] to error the request.
+	///
 	/// [`LiquidityManager::opening_fee_params_generated`]: crate::LiquidityManager::opening_fee_params_generated
+	/// [`LiquidityManager::invalid_token_provided`]: crate::LiquidityManager::invalid_token_provided
 	GetInfo {
 		/// An identifier that must be passed to [`LiquidityManager::opening_fee_params_generated`].
 		///
