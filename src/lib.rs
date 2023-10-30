@@ -1,4 +1,4 @@
-// This file is Copyright its original authors, visible in version contror
+// This file is Copyright its original authors, visible in version control
 // history.
 //
 // This file is licensed under the Apache License, Version 2.0 <LICENSE-APACHE
@@ -20,8 +20,11 @@
 
 mod channel_request;
 pub mod events;
-mod jit_channel;
+pub mod jit_channel;
 mod transport;
 mod utils;
 
-pub use transport::message_handler::{LiquidityManager, LiquidityProviderConfig};
+pub use transport::message_handler::{
+	JITChannelsConfig, LiquidityManager, LiquidityProviderConfig,
+};
+pub use transport::msgs::{RawLSPSMessage, LSPS_MESSAGE_TYPE_ID};

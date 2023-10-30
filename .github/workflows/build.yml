@@ -28,8 +28,6 @@ jobs:
       - name: Pin crates for MSRV
         if: matrix.msrv
         run: |
-          # Tokio MSRV on versions 1.17 through 1.26 is rustc 1.49. Above 1.26 MSRV is 1.56.
-          cargo update -p tokio --precise "1.14.1" --verbose
           # The serde_json crate switched to Rust edition 2021 starting with v1.0.101, i.e., has MSRV of 1.56
           cargo update -p serde_json --precise "1.0.99" --verbose
           cargo update -p serde --precise "1.0.156" --verbose
@@ -37,10 +35,7 @@ jobs:
           cargo update -p quote --precise "1.0.30" --verbose
           # The proc-macro2 crate switched to Rust edition 2021 starting with v1.0.66, i.e., has MSRV of 1.56
           cargo update -p proc-macro2 --precise "1.0.65" --verbose
-          # Sadly the log crate is always a dependency of tokio until 1.20, and has no reasonable MSRV guarantees
-          cargo update -p log --precise "0.4.18" --verbose
-          # The memchr crate switched to Rust edition 2021 starting with v2.6.0
-          cargo update -p memchr --precise "2.5.0" --verbose
+          cargo update -p chrono --precise "0.4.24" --verbose
       - name: Cargo check
         run: cargo check --release
       - name: Check documentation
