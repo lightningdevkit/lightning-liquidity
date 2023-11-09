@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use bitcoin::secp256k1::PublicKey;
 
 use super::msgs::{ChannelInfo, OptionsSupported, Order, OrderId, Payment};
@@ -7,11 +9,13 @@ use crate::transport::msgs::RequestId;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
 	GetInfoResponse {
+		id: u128,
+
 		request_id: RequestId,
 
 		counterparty_node_id: PublicKey,
 
-		version: Vec<u16>,
+		version: u16,
 
 		website: String,
 
@@ -24,12 +28,10 @@ pub enum Event {
 		counterparty_node_id: PublicKey,
 
 		order: Order,
-
-		order_id: OrderId,
 	},
 
 	DisplayOrder {
-		request_id: RequestId,
+		id: u128,
 
 		counterparty_node_id: PublicKey,
 
@@ -60,7 +62,19 @@ pub enum Event {
 		order_id: OrderId,
 	},
 
-	OpenChannel {},
+	OpenChannel {
+		request_id: RequestId,
 
-	Refund {},
+		counterparty_node_id: PublicKey,
+
+		order_id: OrderId,
+	},
+
+	Refund {
+		request_id: RequestId,
+
+		counterparty_node_id: PublicKey,
+
+		order_id: OrderId,
+	},
 }

@@ -134,9 +134,10 @@ impl LSPSMessage {
 			LSPSMessage::LSPS2(LSPS2Message::Request(request_id, request)) => {
 				Some((request_id.0.clone(), request.method().to_string()))
 			}
-			LSPSMessage::LSPS1(LSPS1Message::Request(request_id, request)) => {
-				Some((request_id.0.clone(), request.method().to_string()))
-			}
+			LSPSMessage::LSPS1(LSPS1Message::Request(
+				request_id,
+				request,
+			)) => Some((request_id.0.clone(), request.method().to_string())),
 			_ => None,
 		}
 	}

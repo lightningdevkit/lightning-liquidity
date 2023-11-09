@@ -1,3 +1,5 @@
+use crate::channel_request::channel_manager::CRManager;
+use crate::channel_request::msgs::OptionsSupported;
 use crate::events::{Event, EventQueue};
 use crate::jit_channel::channel_manager::JITChannelManager;
 use crate::jit_channel::msgs::{OpeningFeeParams, RawOpeningFeeParams};
@@ -11,8 +13,8 @@ use lightning::ln::channelmanager::{ChainParameters, ChannelManager, InterceptId
 use lightning::ln::features::{InitFeatures, NodeFeatures};
 use lightning::ln::msgs::{
 	ChannelMessageHandler, ErrorAction, LightningError, OnionMessageHandler, RoutingMessageHandler,
-};
-use lightning::ln::peer_handler::{CustomMessageHandler, PeerManager, SocketDescriptor};
+, RoutingMessageHandler, ChannelMessageHandler, OnionMessageHandler};
+use lightning::ln::peer_handler::{{CustomMessageHandler, PeerManager, SocketDescriptor}, SocketDescriptor};
 use lightning::ln::wire::CustomMessageReader;
 use lightning::ln::ChannelId;
 use lightning::routing::router::Router;
@@ -50,6 +52,8 @@ pub(crate) trait ProtocolMessageHandler {
 /// Allows end-user to configure options when using the [`LiquidityManager`]
 /// to provide liquidity services to clients.
 pub struct LiquidityProviderConfig {
+	/// LSPS1 Configuration
+	pub lsps1_config: Option<CRChannelConfig>,
 	/// Optional configuration for JIT channels
 	/// should you want to support them.
 	pub jit_channels: Option<JITChannelsConfig>,
@@ -65,6 +69,16 @@ pub struct JITChannelsConfig {
 	pub min_payment_size_msat: u64,
 	/// The maximum payment size you are willing to accept.
 	pub max_payment_size_msat: u64,
+}
+
+pub struct CRChannelConfig {
+	pub token: Option<String>,
+
+	pub max_fees: Option<u64>,
+
+	pub options_supported: Option<OptionsSupported>,
+
+	pub website: Option<String>,
 }
 
 /// The main interface into LSP functionality.
@@ -120,6 +134,8 @@ pub struct LiquidityManager<
 	pending_events: Arc<EventQueue>,
 	request_id_to_method_map: Mutex<HashMap<String, String>>,
 	lsps0_message_handler: LSPS0MessageHandler<ES>,
+	lsps1_message_handler:
+		Option<CRManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, CMH, NS>>,
 	lsps2_message_handler:
 		Option<JITChannelManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, CMH, NS>>,
 	provider_config: Option<LiquidityProviderConfig>,
@@ -130,21 +146,16 @@ pub struct LiquidityManager<
 }
 
 impl<
-		ES: Deref + Clone,
+		ES: Deref,
 		M: Deref,
 		T: Deref,
 		F: Deref,
 		R: Deref,
 		SP: Deref,
 		L: Deref,
-		Descriptor: SocketDescriptor,
-		RM: Deref,
-		CM: Deref,
-		OM: Deref,
-		CMH: Deref,
 		NS: Deref,
 		C: Deref,
-	> LiquidityManager<ES, M, T, F, R, SP, L, Descriptor, RM, CM, OM, CMH, NS, C>
+	> LiquidityManager<ES, M, T, F, R, SP, L, NS, C>
 where
 	ES::Target: EntropySource,
 	M::Target: chain::Watch<<SP::Target as SignerProvider>::Signer>,
@@ -173,7 +184,7 @@ where {
 		let pending_events = Arc::new(EventQueue::default());
 
 		let lsps0_message_handler =
-			LSPS0MessageHandler::new(entropy_source.clone(), vec![], Arc::clone(&pending_messages));
+			LSPS0MessageHandler::new(entropy_source.clone().clone(), vec![], Arc::clone(&pending_messages));
 
 		let lsps2_message_handler = provider_config.as_ref().and_then(|config| {
 			config.jit_channels.as_ref().map(|jit_channels_config| {
@@ -187,11 +198,24 @@ where {
 			})
 		});
 
+		let lsps1_message_handler = provider_config.as_ref().and_then(|config| {
+			config.lsps1_config.as_ref().map(|lsps1_config| {
+				CRManager::new(
+					entropy_source.clone(),
+					lsps1_config,
+					Arc::clone(&pending_messages),
+					Arc::clone(&pending_events),
+					Arc::clone(&channel_manager),
+				)
+			})
+		});
+
 		Self {
 			pending_messages,
 			pending_events,
 			request_id_to_method_map: Mutex::new(HashMap::new()),
 			lsps0_message_handler,
+			lsps1_message_handler,
 			lsps2_message_handler,
 			provider_config,
 			channel_manager,
@@ -404,15 +428,14 @@ where {
 					return Err(LightningError { err: format!("Received LSPS2 message without LSPS2 message handler configured. From node = {:?}", sender_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
 				}
 			},
-			_ => {
-				return Err(LightningError {
-					err: format!(
-						"Received message without message handler configured. From node = {:?}",
-						sender_node_id
-					),
-					action: ErrorAction::IgnoreAndLog(Level::Info),
-				});
-			}
+			LSPSMessage::LSPS1(msg) => match &self.lsps1_message_handler {
+				Some(lsps1_message_handler) => {
+					lsps1_message_handler.handle_message(msg, sender_node_id)?;
+				}
+				None => {
+					return Err(LightningError { err: format!("Received LSPS1 message without LSPS1 message handler configured. From node = {:?}", sender_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
+				}
+			},
 		}
 		Ok(())
 	}
@@ -424,7 +447,7 @@ where {
 }
 
 impl<
-		ES: Deref + Clone,
+		ES: Deref + Clone + Clone,
 		M: Deref,
 		T: Deref,
 		F: Deref,

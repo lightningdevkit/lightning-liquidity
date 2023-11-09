@@ -1,4 +1,5 @@
 use std::convert::TryFrom;
+use chrono::Utc;
 
 use serde::{Deserialize, Serialize};
 
@@ -11,7 +12,11 @@ pub(crate) const LSPS1_GET_INFO_METHOD_NAME: &str = "lsps1.get_info";
 pub(crate) const LSPS1_CREATE_ORDER_METHOD_NAME: &str = "lsps1.create_order";
 pub(crate) const LSPS1_GET_ORDER_METHOD_NAME: &str = "lsps1.get_order";
 
-pub(crate) const REFUND_ONCHAIN_ADDRESS: bool = false;
+pub(crate) const LSPS1_CREATE_ORDER_REQUEST_INVALID_PARAMS_ERROR_CODE: i32 = -32602;
+pub(crate) const LSPS1_CREATE_ORDER_REQUEST_ORDER_MISMATCH_ERROR_CODE: i32 = 1000;
+pub(crate) const LSPS1_CREATE_ORDER_REQUEST_CLIENT_REJECTED_ERROR_CODE: i32 = 1001;
+pub(crate) const LSPS1_CREATE_ORDER_REQUEST_INVALID_VERSION_ERROR_CODE: i32 = 1;
+pub(crate) const LSPS1_CREATE_ORDER_REQUEST_INVALID_TOKEN_ERROR_CODE: i32 = 2;
 
 // Create a const to show preferred way for user payment
 // Should this be set everytime before payment?
@@ -50,13 +55,12 @@ pub struct GetInfoResponse {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CreateOrderRequest {
+	pub version: u16,
 	pub order: Order,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Order {
-	// order_id should be separate field
-	pub order_id: Option<OrderId>,
 	pub api_version: u16,
 	pub lsp_balance_sat: u64,
 	pub client_balance_sat: u64,
@@ -69,11 +73,11 @@ pub struct Order {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CreateOrderResponse {
-	pub order: Order,
 	pub order_id: OrderId,
+	pub order: Order,
 	pub order_state: OrderState,
-	pub created_at: String,
-	pub expires_at: String,
+	pub created_at: chrono::DateTime<Utc>,
+	pub expires_at: chrono::DateTime<Utc>,
 	pub payment: Payment,
 	pub channel: Option<ChannelInfo>,
 }
@@ -162,7 +166,7 @@ impl LSPS1Request {
 pub enum LSPS1Response {
 	GetInfo(GetInfoResponse),
 	CreateOrder(CreateOrderResponse),
-	OrderError(ResponseError),
+	CreateOrderError(ResponseError),
 	GetOrder(GetOrderResponse),
 	GetOrderError(ResponseError),
 }
