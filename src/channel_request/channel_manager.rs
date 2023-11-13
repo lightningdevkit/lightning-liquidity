@@ -7,39 +7,37 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
-use std::collections::HashMap;
-use std::marker::Sync;
-use std::ops::Deref;
-use std::option;
-use std::sync::{Arc, Mutex, RwLock};
 use chrono::Utc;
+use std::collections::HashMap;
+use std::ops::Deref;
+use std::sync::{Arc, Mutex, RwLock};
 
 use bitcoin::secp256k1::PublicKey;
 use lightning::chain;
 use lightning::chain::chaininterface::{BroadcasterInterface, FeeEstimator};
-use lightning::ln::channelmanager::{ChannelManager, InterceptId};
+use lightning::ln::channelmanager::ChannelManager;
 use lightning::ln::msgs::{
 	ChannelMessageHandler, ErrorAction, LightningError, OnionMessageHandler, RoutingMessageHandler,
 };
 use lightning::ln::peer_handler::{CustomMessageHandler, PeerManager, SocketDescriptor};
-use lightning::ln::ChannelId;
 use lightning::routing::router::Router;
 use lightning::sign::{EntropySource, NodeSigner, SignerProvider};
 use lightning::util::errors::APIError;
 use lightning::util::logger::{Level, Logger};
 
 use crate::events::EventQueue;
-use crate::transport::message_handler::{ProtocolMessageHandler, CRChannelConfig};
+use crate::transport::message_handler::{CRChannelConfig, ProtocolMessageHandler};
 use crate::transport::msgs::{LSPSMessage, RequestId};
 use crate::utils;
 use crate::{events::Event, transport::msgs::ResponseError};
 
 use super::msgs::{
-	ChannelInfo, ChannelStatus, CreateOrderRequest, CreateOrderResponse, GetInfoRequest,
-	GetInfoResponse, GetOrderRequest, GetOrderResponse, LSPS1Message, LSPS1Request, LSPS1Response,
-	OptionsSupported, Order, OrderId, OrderState, Payment,  LSPS1_CREATE_ORDER_REQUEST_INVALID_VERSION_ERROR_CODE, LSPS1_CREATE_ORDER_REQUEST_ORDER_MISMATCH_ERROR_CODE,
+	ChannelInfo, CreateOrderRequest, CreateOrderResponse, GetInfoRequest, GetInfoResponse,
+	GetOrderRequest, GetOrderResponse, LSPS1Message, LSPS1Request, LSPS1Response, OptionsSupported,
+	Order, OrderId, OrderState, Payment, LSPS1_CREATE_ORDER_REQUEST_INVALID_VERSION_ERROR_CODE,
+	LSPS1_CREATE_ORDER_REQUEST_ORDER_MISMATCH_ERROR_CODE,
 };
-use super::utils::{is_valid};
+use super::utils::is_valid;
 
 const SUPPORTED_SPEC_VERSIONS: [u16; 1] = [1];
 
@@ -54,20 +52,16 @@ impl From<ChannelStateError> for LightningError {
 #[derive(PartialEq, Debug)]
 enum InboundRequestState {
 	InfoRequested,
-	OptionsSupport { 
-		version: u16,
-		options_supported: OptionsSupported 
-	},
-	OrderRequested { 
-		version: u16,
-		order: Order,
-	},
+	OptionsSupport { version: u16, options_supported: OptionsSupported },
+	OrderRequested { version: u16, order: Order },
 	PendingPayment { order_id: OrderId },
 	AwaitingConfirmation { id: u128, order_id: OrderId },
 }
 
 impl InboundRequestState {
-	fn info_received(&self, versions: Vec<u16>, options: OptionsSupported) -> Result<Self, ChannelStateError> {
+	fn info_received(
+		&self, versions: Vec<u16>, options: OptionsSupported,
+	) -> Result<Self, ChannelStateError> {
 		let max_shared_version = versions
 			.iter()
 			.filter(|version| SUPPORTED_SPEC_VERSIONS.contains(version))
@@ -79,9 +73,10 @@ impl InboundRequestState {
 		)))?;
 
 		match self {
-			InboundRequestState::InfoRequested => {
-				Ok(InboundRequestState::OptionsSupport { version: max_shared_version, options_supported: options })
-			}
+			InboundRequestState::InfoRequested => Ok(InboundRequestState::OptionsSupport {
+				version: max_shared_version,
+				options_supported: options,
+			}),
 			state => Err(ChannelStateError(format!(
 				"Received unexpected get_versions response. Channel was in state: {:?}",
 				state
@@ -91,14 +86,10 @@ impl InboundRequestState {
 
 	pub fn order_requested(&self, order: Order) -> Result<Self, ChannelStateError> {
 		match self {
-			InboundRequestState::OptionsSupport { version , options_supported } => {
+			InboundRequestState::OptionsSupport { version, options_supported } => {
 				if is_valid(&order, options_supported) {
-					Ok(InboundRequestState::OrderRequested { 
-						version: *version,
-						order,
-					})
-				}
-				else {
+					Ok(InboundRequestState::OrderRequested { version: *version, order })
+				} else {
 					return Err(ChannelStateError(format!(
 						"The order created does not match options supported by LSP. Options Supported by LSP are {:?}. The order created was {:?}",
 						options_supported, order
@@ -112,13 +103,14 @@ impl InboundRequestState {
 		}
 	}
 
-	pub fn order_received(&self, response_order: &Order, order_id: OrderId) -> Result<Self, ChannelStateError> {
+	pub fn order_received(
+		&self, response_order: &Order, order_id: OrderId,
+	) -> Result<Self, ChannelStateError> {
 		match self {
 			InboundRequestState::OrderRequested { version, order } => {
 				if response_order == order {
 					Ok(InboundRequestState::PendingPayment { order_id })
-				}
-				else {
+				} else {
 					Err(ChannelStateError(format!(
 						"Received order is different from created order. The order created was : {:?}. Order Received from LSP is : {:?}",
 						order, response_order
@@ -145,7 +137,7 @@ impl InboundRequestState {
 				state
 			))),
 		}
-	} 
+	}
 }
 
 struct InboundCRChannel {
@@ -158,7 +150,9 @@ impl InboundCRChannel {
 		Self { id, state: InboundRequestState::InfoRequested }
 	}
 
-	pub fn info_received(&mut self, versions: Vec<u16>, options: OptionsSupported) -> Result<u16, LightningError> {
+	pub fn info_received(
+		&mut self, versions: Vec<u16>, options: OptionsSupported,
+	) -> Result<u16, LightningError> {
 		self.state = self.state.info_received(versions, options)?;
 
 		match self.state {
@@ -174,9 +168,7 @@ impl InboundCRChannel {
 		self.state = self.state.order_requested(order)?;
 
 		match self.state {
-			InboundRequestState::OrderRequested { version, .. } => {
-				Ok(version)
-			}
+			InboundRequestState::OrderRequested { version, .. } => Ok(version),
 			_ => {
 				return Err(LightningError {
 					action: ErrorAction::IgnoreAndLog(Level::Error),
@@ -186,7 +178,9 @@ impl InboundCRChannel {
 		}
 	}
 
-	pub fn order_received(&mut self, order: &Order, order_id: OrderId) -> Result<(), LightningError> {
+	pub fn order_received(
+		&mut self, order: &Order, order_id: OrderId,
+	) -> Result<(), LightningError> {
 		self.state = self.state.order_received(order, order_id)?;
 		Ok(())
 	}
@@ -194,14 +188,13 @@ impl InboundCRChannel {
 	pub fn pay_for_channel(&mut self, channel_id: u128) -> Result<(), LightningError> {
 		self.state = self.state.pay_for_channel(channel_id)?;
 		Ok(())
-	} 
+	}
 }
 
 #[derive(PartialEq, Debug)]
 enum OutboundRequestState {
 	OrderCreated { order_id: OrderId },
 	WaitingPayment { order_id: OrderId },
-	Refund,
 	Ready,
 }
 
@@ -220,11 +213,10 @@ impl OutboundRequestState {
 }
 
 struct OutboundCRChannelConfig {
-	options_supported: OptionsSupported,
-	/* supported_versions: Vec<u16>, */
-	zero_conf_channels: bool,
-	zero_conf_payments: bool,
-	onchain_payment: bool,
+	order: Order,
+	created_at: chrono::DateTime<Utc>,
+	expires_at: chrono::DateTime<Utc>,
+	payment: Payment,
 }
 
 struct OutboundCRChannel {
@@ -233,23 +225,13 @@ struct OutboundCRChannel {
 }
 
 impl OutboundCRChannel {
-	pub fn new(options_supported: OptionsSupported, order_id: OrderId) -> Self {
-		let zero_conf_channels = options_supported.minimum_channel_confirmations == 0;
-		let zero_conf_payments = options_supported.minimum_onchain_payment_confirmations == 0;
-		let onchain_payment = options_supported.min_onchain_payment_size_sat == None;
-		let supports_zero_channel_reserve = options_supported.supports_zero_channel_reserve;
-		
+	pub fn new(
+		order: Order, created_at: chrono::DateTime<Utc>, expires_at: chrono::DateTime<Utc>,
+		order_id: OrderId, payment: Payment,
+	) -> Self {
 		Self {
-			state: OutboundRequestState::OrderCreated { 
-				order_id
-			}, 
-			config: OutboundCRChannelConfig { 
-				options_supported, 
-				/* supported_versions: options_supported.supports_zero_channel_reserve,*/
-				zero_conf_payments, 
-				onchain_payment,
-    			zero_conf_channels, 
-			}
+			state: OutboundRequestState::OrderCreated { order_id },
+			config: OutboundCRChannelConfig { order, created_at, expires_at, payment },
 		}
 	}
 	pub fn create_payment_invoice(&mut self) -> Result<(), LightningError> {
@@ -257,10 +239,10 @@ impl OutboundCRChannel {
 		Ok(())
 	}
 
-	pub fn check_order_validity(&mut self, order: &Order) -> bool {
-		let options = &self.config.options_supported;
+	pub fn check_order_validity(&self, options_supported: &OptionsSupported) -> bool {
+		let order = &self.config.order;
 
-		is_valid(order, options)
+		is_valid(order, options_supported)
 	}
 }
 
@@ -269,7 +251,6 @@ struct PeerState {
 	inbound_channels_by_id: HashMap<u128, InboundCRChannel>,
 	outbound_channels_by_order_id: HashMap<OrderId, OutboundCRChannel>,
 	request_to_cid: HashMap<RequestId, u128>,
-	orders_to_id: HashMap<OrderId, Order>,
 	pending_requests: HashMap<RequestId, LSPS1Request>,
 }
 
@@ -420,10 +401,14 @@ where
 		let response = GetInfoResponse {
 			supported_versions: SUPPORTED_SPEC_VERSIONS.to_vec(),
 			website: self.website.clone().unwrap().to_string(),
-			options: self.options_config.clone().ok_or(LightningError{
-				err: format!("Configuration for LSP server not set."),
-				action: ErrorAction::IgnoreAndLog(Level::Info),
-			}).unwrap(),
+			options: self
+				.options_config
+				.clone()
+				.ok_or(LightningError {
+					err: format!("Configuration for LSP server not set."),
+					action: ErrorAction::IgnoreAndLog(Level::Info),
+				})
+				.unwrap(),
 		};
 
 		self.enqueue_response(*counterparty_node_id, request_id, LSPS1Response::GetInfo(response));
@@ -442,7 +427,7 @@ where
 				let channel_id =
 					peer_state.request_to_cid.remove(&request_id).ok_or(LightningError {
 						err: format!(
-							"Received get_versions response for an unknown request: {:?}",
+							"Received get_info response for an unknown request: {:?}",
 							request_id
 						),
 						action: ErrorAction::IgnoreAndLog(Level::Info),
@@ -453,20 +438,21 @@ where
 					.get_mut(&channel_id)
 					.ok_or(LightningError {
 						err: format!(
-							"Received get_versions response for an unknown channel: {:?}",
+							"Received get_info response for an unknown channel: {:?}",
 							channel_id
 						),
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					})?;
 
-				let version = match inbound_channel.info_received(result.supported_versions, result.options.clone()) {
+				let version = match inbound_channel
+					.info_received(result.supported_versions, result.options.clone())
+				{
 					Ok(version) => version,
 					Err(e) => {
 						peer_state.remove_inbound_channel(channel_id);
 						return Err(e);
 					}
 				};
-				
 
 				self.enqueue_event(Event::LSPS1(super::event::Event::GetInfoResponse {
 					id: channel_id,
@@ -506,7 +492,7 @@ where
 						err: format!("Channel with id {} not found", channel_id),
 					})?;
 
-				let version = match inbound_channel.order_requested(order.clone())  {
+				let version = match inbound_channel.order_requested(order.clone()) {
 					Ok(version) => version,
 					Err(e) => {
 						peer_state.remove_inbound_channel(channel_id);
@@ -523,10 +509,7 @@ where
 						*counterparty_node_id,
 						LSPS1Message::Request(
 							request_id,
-							LSPS1Request::CreateOrder(CreateOrderRequest { 
-								order, 
-								version: version
-							}),
+							LSPS1Request::CreateOrder(CreateOrderRequest { order, version }),
 						)
 						.into(),
 					));
@@ -547,7 +530,6 @@ where
 	fn handle_create_order_request(
 		&self, request_id: RequestId, counterparty_node_id: &PublicKey, params: CreateOrderRequest,
 	) -> Result<(), LightningError> {
-		
 		if !SUPPORTED_SPEC_VERSIONS.contains(&params.version) {
 			self.enqueue_response(
 				*counterparty_node_id,
@@ -571,7 +553,10 @@ where
 				LSPS1Response::CreateOrderError(ResponseError {
 					code: LSPS1_CREATE_ORDER_REQUEST_ORDER_MISMATCH_ERROR_CODE,
 					message: format!("Order does not match options supported by LSP server"),
-					data: Some(format!("Supported options are {:?}", &self.options_config.as_ref().unwrap())),
+					data: Some(format!(
+						"Supported options are {:?}",
+						&self.options_config.as_ref().unwrap()
+					)),
 				}),
 			);
 			return Err(LightningError {
@@ -582,7 +567,7 @@ where
 
 		let mut outer_state_lock = self.per_peer_state.write().unwrap();
 
-		let mut inner_state_lock = outer_state_lock
+		let inner_state_lock = outer_state_lock
 			.entry(*counterparty_node_id)
 			.or_insert(Mutex::new(PeerState::default()));
 		let peer_state = inner_state_lock.get_mut().unwrap();
@@ -601,7 +586,8 @@ where
 	}
 
 	pub fn send_invoice_for_order(
-		&self, request_id: RequestId, counterparty_node_id: &PublicKey, payment: Payment, created_at: chrono::DateTime<Utc>, expires_at: chrono::DateTime<Utc>,
+		&self, request_id: RequestId, counterparty_node_id: &PublicKey, payment: Payment,
+		created_at: chrono::DateTime<Utc>, expires_at: chrono::DateTime<Utc>,
 	) -> Result<(), APIError> {
 		let outer_state_lock = self.per_peer_state.read().unwrap();
 
@@ -612,11 +598,15 @@ where
 				match peer_state.pending_requests.remove(&request_id) {
 					Some(LSPS1Request::CreateOrder(params)) => {
 						let order_id = self.generate_order_id();
-						let channel = OutboundCRChannel::new(self.options_config.clone().unwrap(), order_id.clone());
+						let channel = OutboundCRChannel::new(
+							params.order.clone(),
+							created_at.clone(),
+							expires_at.clone(),
+							order_id.clone(),
+							payment.clone(),
+						);
 
 						peer_state.insert_outbound_channel(order_id.clone(), channel);
-
-						peer_state.orders_to_id.insert(order_id.clone(), params.order.clone());
 
 						self.enqueue_response(
 							*counterparty_node_id,
@@ -632,15 +622,22 @@ where
 							}),
 						);
 					}
-					
-					_ => return Err(APIError::APIMisuseError {
-						err: format!("No pending buy request for request_id: {:?}", request_id),
-					}),
+
+					_ => {
+						return Err(APIError::APIMisuseError {
+							err: format!("No pending buy request for request_id: {:?}", request_id),
+						})
+					}
 				}
 			}
-			None => return Err(APIError::APIMisuseError {
-				err: format!("No state for the counterparty exists: {:?}", counterparty_node_id),
-			}),
+			None => {
+				return Err(APIError::APIMisuseError {
+					err: format!(
+						"No state for the counterparty exists: {:?}",
+						counterparty_node_id
+					),
+				})
+			}
 		}
 
 		Ok(())
@@ -656,27 +653,28 @@ where
 				let mut peer_state = inner_state_lock.lock().unwrap();
 
 				let channel_id =
-				peer_state.request_to_cid.remove(&request_id).ok_or(LightningError {
-					err: format!(
-						"Received get_versions response for an unknown request: {:?}",
-						request_id
-					),
-					action: ErrorAction::IgnoreAndLog(Level::Info),
-				})?;
+					peer_state.request_to_cid.remove(&request_id).ok_or(LightningError {
+						err: format!(
+							"Received create_order response for an unknown request: {:?}",
+							request_id
+						),
+						action: ErrorAction::IgnoreAndLog(Level::Info),
+					})?;
 
 				let inbound_channel = peer_state
 					.inbound_channels_by_id
 					.get_mut(&channel_id)
 					.ok_or(LightningError {
 						err: format!(
-							"Received get_versions response for an unknown channel: {:?}",
+							"Received create_order response for an unknown channel: {:?}",
 							channel_id
 						),
 						action: ErrorAction::IgnoreAndLog(Level::Info),
-					}
-				)?;
+					})?;
 
-				if let Err(e) = inbound_channel.order_received(&response.order, response.order_id.clone()) {
+				if let Err(e) =
+					inbound_channel.order_received(&response.order, response.order_id.clone())
+				{
 					peer_state.remove_inbound_channel(channel_id);
 					return Err(e);
 				}
@@ -685,7 +683,6 @@ where
 				let max_fees = self.max_fees.unwrap_or(u64::MAX);
 
 				if total_fees == response.payment.order_total_sat && total_fees < max_fees {
-					
 					self.enqueue_event(Event::LSPS1(super::event::Event::DisplayOrder {
 						id: channel_id,
 						counterparty_node_id: *counterparty_node_id,
@@ -696,14 +693,17 @@ where
 				} else {
 					peer_state.remove_inbound_channel(channel_id);
 					return Err(LightningError {
-						err: format!("Fees are too high : {:?}", total_fees), 
-						action: ErrorAction::IgnoreAndLog(Level::Info), 
+						err: format!("Fees are too high : {:?}", total_fees),
+						action: ErrorAction::IgnoreAndLog(Level::Info),
 					});
 				}
 			}
 			None => {
 				return Err(LightningError {
-					err: format!("No existing state with counterparty {}", counterparty_node_id),
+					err: format!(
+						"Received create_order response from unknown peer: {}",
+						counterparty_node_id
+					),
 					action: ErrorAction::IgnoreAndLog(Level::Info),
 				})
 			}
@@ -721,43 +721,32 @@ where
 				let mut peer_state = inner_state_lock.lock().unwrap();
 
 				let channel_id =
-				peer_state.request_to_cid.remove(&request_id).ok_or(LightningError {
-					err: format!(
-						"Received get_versions response for an unknown request: {:?}",
-						request_id
-					),
-					action: ErrorAction::IgnoreAndLog(Level::Info),
-				})?;
+					peer_state.request_to_cid.remove(&request_id).ok_or(LightningError {
+						err: format!(
+							"Received create order error for an unknown request: {:?}",
+							request_id
+						),
+						action: ErrorAction::IgnoreAndLog(Level::Info),
+					})?;
 
 				let inbound_channel = peer_state
 					.inbound_channels_by_id
 					.get_mut(&channel_id)
 					.ok_or(LightningError {
 						err: format!(
-							"Received get_versions response for an unknown channel: {:?}",
+							"Received create order error for an unknown channel: {:?}",
 							channel_id
 						),
 						action: ErrorAction::IgnoreAndLog(Level::Info),
-					}
-				)?;
-
-				match &inbound_channel.state {
-					InboundRequestState::OrderRequested { version, order } => {
-						return Err(LightningError { err: format!( "Received error response from create order request ({:?}) with counterparty {:?}. Error code = {}, message = {}", request_id, counterparty_node_id, error.code, error.message), action: ErrorAction::IgnoreAndLog(Level::Info)});
-					}
-					_ => {
-						return Err(LightningError { err: format!("Received an unexpected error response for a create order request from counterparty ({:?})", counterparty_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
-					}
-				}
+					})?;
+				Ok(())
 			}
 			None => {
 				return Err(LightningError { err: format!("Received error response for a create order request from an unknown counterparty ({:?})",counterparty_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
 			}
 		}
-		Ok(())
 	}
 
-	// Send a request to get the order status
 	pub fn check_order_status(
 		&self, counterparty_node_id: &PublicKey, order_id: OrderId, channel_id: u128,
 	) -> Result<(), APIError> {
@@ -771,9 +760,7 @@ where
 				{
 					if let Err(e) = inbound_channel.pay_for_channel(channel_id) {
 						peer_state.remove_inbound_channel(channel_id);
-						return Err(APIError::APIMisuseError {
-							err: e.err
-						});
+						return Err(APIError::APIMisuseError { err: e.err });
 					}
 
 					let request_id = self.generate_request_id();
@@ -785,7 +772,9 @@ where
 							*counterparty_node_id,
 							LSPS1Message::Request(
 								request_id,
-								LSPS1Request::GetOrder(GetOrderRequest { order_id: order_id.clone() }),
+								LSPS1Request::GetOrder(GetOrderRequest {
+									order_id: order_id.clone(),
+								}),
 							)
 							.into(),
 						));
@@ -828,16 +817,19 @@ where
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					})?;
 
-				
 				if let Err(e) = outbound_channel.create_payment_invoice() {
 					peer_state.outbound_channels_by_order_id.remove(&params.order_id);
-					// Check payment confirmation then Refund.
-					self.enqueue_event(Event::LSPS1(super::event::Event::Refund { request_id, counterparty_node_id: todo!(), order_id: todo!() }));
+					self.enqueue_event(Event::LSPS1(super::event::Event::Refund {
+						request_id,
+						counterparty_node_id: *counterparty_node_id,
+						order_id: params.order_id,
+					}));
 					return Err(e);
 				}
 
-				peer_state.pending_requests.insert(request_id.clone(),LSPS1Request::GetOrder(params.clone()));
-
+				peer_state
+					.pending_requests
+					.insert(request_id.clone(), LSPS1Request::GetOrder(params.clone()));
 
 				self.enqueue_event(Event::LSPS1(super::event::Event::CheckPaymentConfirmation {
 					request_id,
@@ -846,9 +838,9 @@ where
 				}));
 			}
 			None => {
-				return Err(LightningError { 
-					err: format!("Received error response for a create order request from an unknown counterparty ({:?})",counterparty_node_id), 
-					action: ErrorAction::IgnoreAndLog(Level::Info)
+				return Err(LightningError {
+					err: format!("Received error response for a create order request from an unknown counterparty ({:?})",counterparty_node_id),
+					action: ErrorAction::IgnoreAndLog(Level::Info),
 				});
 			}
 		}
@@ -858,21 +850,39 @@ where
 
 	pub fn update_order_status(
 		&self, request_id: RequestId, counterparty_node_id: PublicKey, order_id: OrderId,
-		request: GetOrderRequest,
+		order_state: OrderState, channel: Option<ChannelInfo>,
 	) -> Result<(), APIError> {
 		let outer_state_lock = self.per_peer_state.read().unwrap();
 
 		match outer_state_lock.get(&counterparty_node_id) {
 			Some(inner_state_lock) => {
-				let peer_state = inner_state_lock.lock().unwrap();
+				let mut peer_state = inner_state_lock.lock().unwrap();
 
-				let order = peer_state.orders_to_id.get(&order_id).unwrap();
+				if let Some(outbound_channel) =
+					peer_state.outbound_channels_by_order_id.get_mut(&order_id)
+				{
+					let config = &outbound_channel.config;
 
-				self.enqueue_response(
-					counterparty_node_id,
-					request_id,
-					LSPS1Response::GetOrder(GetOrderResponse { response: order.clone() }),
-				)
+					self.enqueue_response(
+						counterparty_node_id,
+						request_id,
+						LSPS1Response::GetOrder(GetOrderResponse {
+							response: CreateOrderResponse {
+								order_id,
+								order: config.order.clone(),
+								order_state,
+								created_at: config.created_at,
+								expires_at: config.expires_at,
+								payment: config.payment.clone(),
+								channel,
+							},
+						}),
+					)
+				} else {
+					return Err(APIError::APIMisuseError {
+						err: format!("Channel with order_id {} not found", order_id.0),
+					});
+				}
 			}
 			None => {
 				return Err(APIError::APIMisuseError {
@@ -883,16 +893,81 @@ where
 		Ok(())
 	}
 
-	fn handle_get_order_response(&self, request_id: RequestId, counterparty_node_id: &PublicKey, params: GetOrderResponse) 
-	-> Result<(), LightningError>{
-		// TODO
+	fn handle_get_order_response(
+		&self, request_id: RequestId, counterparty_node_id: &PublicKey, params: GetOrderResponse,
+	) -> Result<(), LightningError> {
+		let outer_state_lock = self.per_peer_state.read().unwrap();
+		match outer_state_lock.get(&counterparty_node_id) {
+			Some(inner_state_lock) => {
+				let mut peer_state = inner_state_lock.lock().unwrap();
+
+				let channel_id =
+					peer_state.request_to_cid.remove(&request_id).ok_or(LightningError {
+						err: format!(
+							"Received get_versions response for an unknown request: {:?}",
+							request_id
+						),
+						action: ErrorAction::IgnoreAndLog(Level::Info),
+					})?;
+
+				let inbound_channel = peer_state
+					.inbound_channels_by_id
+					.get_mut(&channel_id)
+					.ok_or(LightningError {
+						err: format!(
+							"Received get_versions response for an unknown channel: {:?}",
+							channel_id
+						),
+						action: ErrorAction::IgnoreAndLog(Level::Info),
+					})?;
+			}
+			None => {
+				return Err(LightningError {
+					err: format!(
+						"Received get_order response from unknown peer: {}",
+						counterparty_node_id
+					),
+					action: ErrorAction::IgnoreAndLog(Level::Info),
+				})
+			}
+		}
+
 		Ok(())
 	}
 
-	fn handle_get_order_error(&self,request_id: RequestId, counterparty_node_id: &PublicKey, params: ResponseError)
-	-> Result<(), LightningError>{
-		// TODO: Channel Open/Refund Case.
-		Ok(())
+	fn handle_get_order_error(
+		&self, request_id: RequestId, counterparty_node_id: &PublicKey, params: ResponseError,
+	) -> Result<(), LightningError> {
+		let outer_state_lock = self.per_peer_state.read().unwrap();
+		match outer_state_lock.get(&counterparty_node_id) {
+			Some(inner_state_lock) => {
+				let mut peer_state = inner_state_lock.lock().unwrap();
+
+				let channel_id =
+					peer_state.request_to_cid.remove(&request_id).ok_or(LightningError {
+						err: format!(
+							"Received get_order error for an unknown request: {:?}",
+							request_id
+						),
+						action: ErrorAction::IgnoreAndLog(Level::Info),
+					})?;
+
+				let _inbound_channel = peer_state
+					.inbound_channels_by_id
+					.get_mut(&channel_id)
+					.ok_or(LightningError {
+						err: format!(
+							"Received get_order error for an unknown channel: {:?}",
+							channel_id
+						),
+						action: ErrorAction::IgnoreAndLog(Level::Info),
+					})?;
+				Ok(())
+			}
+			None => {
+				return Err(LightningError { err: format!("Received get_order response for a create order request from an unknown counterparty ({:?})",counterparty_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
+			}
+		}
 	}
 
 	fn enqueue_response(
@@ -901,7 +976,7 @@ where
 		{
 			let mut pending_messages = self.pending_messages.lock().unwrap();
 			pending_messages
-				.push((counterparty_node_id,LSPS1Message::Response(request_id, response).into()));
+				.push((counterparty_node_id, LSPS1Message::Response(request_id, response).into()));
 		}
 
 		if let Some(peer_manager) = self.peer_manager.lock().unwrap().as_ref() {

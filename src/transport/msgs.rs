@@ -134,10 +134,9 @@ impl LSPSMessage {
 			LSPSMessage::LSPS2(LSPS2Message::Request(request_id, request)) => {
 				Some((request_id.0.clone(), request.method().to_string()))
 			}
-			LSPSMessage::LSPS1(LSPS1Message::Request(
-				request_id,
-				request,
-			)) => Some((request_id.0.clone(), request.method().to_string())),
+			LSPSMessage::LSPS1(LSPS1Message::Request(request_id, request)) => {
+				Some((request_id.0.clone(), request.method().to_string()))
+			}
 			_ => None,
 		}
 	}
@@ -202,7 +201,7 @@ impl Serialize for LSPSMessage {
 					LSPS1Response::CreateOrder(result) => {
 						jsonrpc_object.serialize_field(JSONRPC_ERROR_FIELD_KEY, result)?
 					}
-					LSPS1Response::OrderError(error) => {
+					LSPS1Response::CreateOrderError(error) => {
 						jsonrpc_object.serialize_field(JSONRPC_RESULT_FIELD_KEY, error)?
 					}
 					LSPS1Response::GetOrder(result) => {
@@ -408,7 +407,7 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 						if let Some(error) = error {
 							Ok(LSPSMessage::LSPS1(LSPS1Message::Response(
 								RequestId(id),
-								LSPS1Response::OrderError(error),
+								LSPS1Response::CreateOrderError(error),
 							)))
 						} else if let Some(result) = result {
 							let response =

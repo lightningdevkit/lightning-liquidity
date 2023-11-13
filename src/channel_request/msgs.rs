@@ -1,11 +1,8 @@
-use std::convert::TryFrom;
 use chrono::Utc;
+use std::convert::TryFrom;
 
 use serde::{Deserialize, Serialize};
 
-//use bitcoin::hashes::hmac::{Hmac, HmacEngine};
-//use bitcoin::hashes::sha256::Hash as Sha256;
-//use bitcoin::hashes::{Hash, HashEngine};
 use crate::transport::msgs::{LSPSMessage, RequestId, ResponseError};
 
 pub(crate) const LSPS1_GET_INFO_METHOD_NAME: &str = "lsps1.get_info";
@@ -17,11 +14,6 @@ pub(crate) const LSPS1_CREATE_ORDER_REQUEST_ORDER_MISMATCH_ERROR_CODE: i32 = 100
 pub(crate) const LSPS1_CREATE_ORDER_REQUEST_CLIENT_REJECTED_ERROR_CODE: i32 = 1001;
 pub(crate) const LSPS1_CREATE_ORDER_REQUEST_INVALID_VERSION_ERROR_CODE: i32 = 1;
 pub(crate) const LSPS1_CREATE_ORDER_REQUEST_INVALID_TOKEN_ERROR_CODE: i32 = 2;
-
-// Create a const to show preferred way for user payment
-// Should this be set everytime before payment?
-// Ask user for lighting or onchain and then set the const to
-// lightning or onchain
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Hash)]
 pub struct OrderId(pub String);
@@ -49,7 +41,6 @@ pub struct OptionsSupported {
 pub struct GetInfoResponse {
 	pub supported_versions: Vec<u16>,
 	pub website: String,
-	// This field should not be null
 	pub options: OptionsSupported,
 }
 
@@ -142,7 +133,7 @@ pub struct GetOrderRequest {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct GetOrderResponse {
-	pub response: Order,
+	pub response: CreateOrderResponse,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
