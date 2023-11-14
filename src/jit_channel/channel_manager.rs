@@ -714,33 +714,29 @@ where
 						match jit_channel.channel_ready() {
 							Ok((htlcs, total_amt_to_forward_msat)) => {
 								// TODO: review strategy for handling batch forwarding of these htlcs
-								let total_msat: u64 = htlcs
+								let total_received_msat: u64 = htlcs
 									.iter()
 									.map(|htlc| htlc.expected_outbound_amount_msat)
 									.sum();
 
-								let mut fee_msat = total_msat - total_amt_to_forward_msat;
+								let mut fee_remaining_msat =
+									total_received_msat - total_amt_to_forward_msat;
+								let fee_percentage =
+									fee_remaining_msat as f64 / total_received_msat as f64;
 
 								for htlc in htlcs {
-									let min_htlc_msat = self
-										.channel_manager
-										.list_channels_with_counterparty(counterparty_node_id)
-										.iter()
-										.find(|channel| channel.channel_id == *channel_id)
-										.map(|details| details.next_outbound_htlc_minimum_msat)
-										.ok_or(APIError::APIMisuseError {
-											err: format!(
-												"Channel with id {} not found",
-												channel_id
-											),
-										})?;
+									let proportional_fee_amt_msat = (htlc
+										.expected_outbound_amount_msat
+										as f64 * fee_percentage)
+										.ceil() as u64;
+									let actual_fee_amt_msat = std::cmp::min(
+										fee_remaining_msat,
+										proportional_fee_amt_msat,
+									);
 
-									let max_we_can_take =
-										htlc.expected_outbound_amount_msat - min_htlc_msat;
-									let amount_of_fee_to_take =
-										std::cmp::min(fee_msat, max_we_can_take);
 									let amount_to_forward_msat =
-										htlc.expected_outbound_amount_msat - amount_of_fee_to_take;
+										htlc.expected_outbound_amount_msat - actual_fee_amt_msat;
+
 									self.channel_manager.forward_intercepted_htlc(
 										htlc.intercept_id,
 										channel_id,
@@ -748,7 +744,7 @@ where
 										amount_to_forward_msat,
 									)?;
 
-									fee_msat -= amount_of_fee_to_take;
+									fee_remaining_msat -= actual_fee_amt_msat;
 								}
 							}
 							Err(e) => {
