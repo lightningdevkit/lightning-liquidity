@@ -713,38 +713,15 @@ where
 					if let Some(jit_channel) = peer_state.outbound_channels_by_scid.get_mut(&scid) {
 						match jit_channel.channel_ready() {
 							Ok((htlcs, total_amt_to_forward_msat)) => {
-								// TODO: review strategy for handling batch forwarding of these htlcs
-								let total_received_msat: u64 = htlcs
-									.iter()
-									.map(|htlc| htlc.expected_outbound_amount_msat)
-									.sum();
+								let amounts_to_forward_msat = calculate_amount_to_forward(&htlcs, total_amt_to_forward_msat);
 
-								let mut fee_remaining_msat =
-									total_received_msat - total_amt_to_forward_msat;
-								let fee_percentage =
-									fee_remaining_msat as f64 / total_received_msat as f64;
-
-								for htlc in htlcs {
-									let proportional_fee_amt_msat = (htlc
-										.expected_outbound_amount_msat
-										as f64 * fee_percentage)
-										.ceil() as u64;
-									let actual_fee_amt_msat = std::cmp::min(
-										fee_remaining_msat,
-										proportional_fee_amt_msat,
-									);
-
-									let amount_to_forward_msat =
-										htlc.expected_outbound_amount_msat - actual_fee_amt_msat;
-
+								for (intercept_id, amount_to_forward_msat) in amounts_to_forward_msat {
 									self.channel_manager.forward_intercepted_htlc(
-										htlc.intercept_id,
+										intercept_id,
 										channel_id,
 										*counterparty_node_id,
 										amount_to_forward_msat,
 									)?;
-
-									fee_remaining_msat -= actual_fee_amt_msat;
 								}
 							}
 							Err(e) => {
@@ -1299,5 +1276,78 @@ where
 				}
 			},
 		}
+	}
+}
+
+fn calculate_amount_to_forward(htlcs: &[InterceptedHTLC], total_amt_to_forward_msat: u64) -> Vec<(InterceptId, u64)> {
+	let total_received_msat: u64 = htlcs
+		.iter()
+		.map(|htlc| htlc.expected_outbound_amount_msat)
+		.sum();
+
+	let mut fee_remaining_msat =
+		total_received_msat - total_amt_to_forward_msat;
+
+	let fee_percentage =
+		fee_remaining_msat as f64 / total_received_msat as f64;
+
+	htlcs.iter().map(|htlc| {
+		let proportional_fee_amt_msat = (htlc
+			.expected_outbound_amount_msat
+			as f64 * fee_percentage)
+			.ceil() as u64;
+		let actual_fee_amt_msat = std::cmp::min(
+			fee_remaining_msat,
+			proportional_fee_amt_msat,
+		);
+
+		let amount_to_forward_msat =
+			htlc.expected_outbound_amount_msat - actual_fee_amt_msat;
+		
+
+		fee_remaining_msat -= actual_fee_amt_msat;
+		
+		(htlc.intercept_id, amount_to_forward_msat)
+	}).collect()
+}
+
+#[cfg(test)]
+mod tests {
+
+	use super::*;
+
+	#[test]
+	fn test_calculate_amount_to_forward() {
+		let htlcs = vec![
+			InterceptedHTLC {
+				intercept_id: InterceptId([0; 32]),
+				expected_outbound_amount_msat: 1000,
+			},
+			InterceptedHTLC {
+				intercept_id: InterceptId([1; 32]),
+				expected_outbound_amount_msat: 2000,
+			},
+			InterceptedHTLC {
+				intercept_id: InterceptId([2; 32]),
+				expected_outbound_amount_msat: 3000,
+			},
+		];
+
+		let total_amt_to_forward_msat = 5000;
+
+		let result = calculate_amount_to_forward(&htlcs, total_amt_to_forward_msat);
+
+		// 1000 in fees total, (1000 / 6000) 16.66% of each htlcs in fees
+		// 167 in fees from first
+		// 334 in fees from second
+		// 499 in fees from third
+		assert_eq!(result[0].0, htlcs[0].intercept_id);
+		assert_eq!(result[0].1, 833);
+
+		assert_eq!(result[1].0, htlcs[1].intercept_id);
+		assert_eq!(result[1].1, 1666);
+
+		assert_eq!(result[2].0, htlcs[2].intercept_id);
+		assert_eq!(result[2].1, 2501);
 	}
 }
