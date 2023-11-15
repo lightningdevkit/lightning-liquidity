@@ -13,6 +13,7 @@ use std::ops::Deref;
 use std::sync::{Arc, Mutex, RwLock};
 
 use bitcoin::secp256k1::PublicKey;
+use lightning::chain;
 use lightning::chain::chaininterface::{BroadcasterInterface, FeeEstimator};
 use lightning::ln::channelmanager::{ChannelManager, InterceptId};
 use lightning::ln::msgs::{
@@ -24,7 +25,6 @@ use lightning::routing::router::Router;
 use lightning::sign::{EntropySource, NodeSigner, SignerProvider};
 use lightning::util::errors::APIError;
 use lightning::util::logger::{Level, Logger};
-use lightning::{chain, log_debug};
 
 use crate::events::EventQueue;
 use crate::jit_channel::utils::{compute_opening_fee, is_valid_opening_fee_params};
@@ -233,8 +233,6 @@ impl OutboundJITChannelState {
 				let total_expected_outbound_amount_msat =
 					htlcs.iter().map(|htlc| htlc.expected_outbound_amount_msat).sum();
 
-				let supports_mpp = payment_size_msat.is_some();
-
 				let expected_payment_size_msat =
 					payment_size_msat.unwrap_or(total_expected_outbound_amount_msat);
 
@@ -250,7 +248,8 @@ impl OutboundJITChannelState {
 					)
 				))?;
 
-				let amt_to_forward_msat = expected_payment_size_msat - opening_fee_msat;
+				let amt_to_forward_msat =
+					expected_payment_size_msat.saturating_sub(opening_fee_msat);
 
 				if total_expected_outbound_amount_msat >= expected_payment_size_msat
 					&& amt_to_forward_msat > 0
@@ -261,7 +260,8 @@ impl OutboundJITChannelState {
 						amt_to_forward_msat,
 					})
 				} else {
-					if supports_mpp {
+					// payment size being specified means MPP is supported
+					if payment_size_msat.is_some() {
 						Ok(OutboundJITChannelState::AwaitingPayment {
 							min_fee_msat: *min_fee_msat,
 							proportional_fee: *proportional_fee,
@@ -323,7 +323,7 @@ impl OutboundJITChannel {
 
 		match &self.state {
 			OutboundJITChannelState::AwaitingPayment { htlcs, payment_size_msat, .. } => {
-				// log that we received an htlc but are still awaiting payment
+				// TODO: log that we received an htlc but are still awaiting payment
 				Ok(None)
 			}
 			OutboundJITChannelState::PendingChannelOpen {
@@ -713,9 +713,12 @@ where
 					if let Some(jit_channel) = peer_state.outbound_channels_by_scid.get_mut(&scid) {
 						match jit_channel.channel_ready() {
 							Ok((htlcs, total_amt_to_forward_msat)) => {
-								let amounts_to_forward_msat = calculate_amount_to_forward(&htlcs, total_amt_to_forward_msat);
+								let amounts_to_forward_msat =
+									calculate_amount_to_forward(&htlcs, total_amt_to_forward_msat);
 
-								for (intercept_id, amount_to_forward_msat) in amounts_to_forward_msat {
+								for (intercept_id, amount_to_forward_msat) in
+									amounts_to_forward_msat
+								{
 									self.channel_manager.forward_intercepted_htlc(
 										intercept_id,
 										channel_id,
@@ -1279,36 +1282,30 @@ where
 	}
 }
 
-fn calculate_amount_to_forward(htlcs: &[InterceptedHTLC], total_amt_to_forward_msat: u64) -> Vec<(InterceptId, u64)> {
-	let total_received_msat: u64 = htlcs
+fn calculate_amount_to_forward(
+	htlcs: &[InterceptedHTLC], total_amt_to_forward_msat: u64,
+) -> Vec<(InterceptId, u64)> {
+	let total_received_msat: u64 =
+		htlcs.iter().map(|htlc| htlc.expected_outbound_amount_msat).sum();
+
+	let mut fee_remaining_msat = total_received_msat - total_amt_to_forward_msat;
+
+	let fee_percentage = fee_remaining_msat as f64 / total_received_msat as f64;
+
+	htlcs
 		.iter()
-		.map(|htlc| htlc.expected_outbound_amount_msat)
-		.sum();
+		.map(|htlc| {
+			let proportional_fee_amt_msat =
+				(htlc.expected_outbound_amount_msat as f64 * fee_percentage).ceil() as u64;
+			let actual_fee_amt_msat = std::cmp::min(fee_remaining_msat, proportional_fee_amt_msat);
 
-	let mut fee_remaining_msat =
-		total_received_msat - total_amt_to_forward_msat;
+			let amount_to_forward_msat = htlc.expected_outbound_amount_msat - actual_fee_amt_msat;
 
-	let fee_percentage =
-		fee_remaining_msat as f64 / total_received_msat as f64;
+			fee_remaining_msat -= actual_fee_amt_msat;
 
-	htlcs.iter().map(|htlc| {
-		let proportional_fee_amt_msat = (htlc
-			.expected_outbound_amount_msat
-			as f64 * fee_percentage)
-			.ceil() as u64;
-		let actual_fee_amt_msat = std::cmp::min(
-			fee_remaining_msat,
-			proportional_fee_amt_msat,
-		);
-
-		let amount_to_forward_msat =
-			htlc.expected_outbound_amount_msat - actual_fee_amt_msat;
-		
-
-		fee_remaining_msat -= actual_fee_amt_msat;
-		
-		(htlc.intercept_id, amount_to_forward_msat)
-	}).collect()
+			(htlc.intercept_id, amount_to_forward_msat)
+		})
+		.collect()
 }
 
 #[cfg(test)]
