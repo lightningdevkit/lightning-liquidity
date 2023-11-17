@@ -1,8 +1,11 @@
+use crate::channel_request::msgs::{
+	LSPS1Message, LSPS1Request, LSPS1Response, LSPS1_CREATE_ORDER_METHOD_NAME,
+	LSPS1_GET_INFO_METHOD_NAME, LSPS1_GET_ORDER_METHOD_NAME,
+};
 use crate::jit_channel::msgs::{
 	LSPS2Message, LSPS2Request, LSPS2Response, LSPS2_BUY_METHOD_NAME, LSPS2_GET_INFO_METHOD_NAME,
 	LSPS2_GET_VERSIONS_METHOD_NAME,
 };
-
 use lightning::impl_writeable_msg;
 use lightning::ln::wire;
 use serde::de;
@@ -95,6 +98,7 @@ impl TryFrom<LSPSMessage> for LSPS0Message {
 			LSPSMessage::Invalid => Err(()),
 			LSPSMessage::LSPS0(message) => Ok(message),
 			LSPSMessage::LSPS2(_) => Err(()),
+			LSPSMessage::LSPS1(_) => Err(()),
 		}
 	}
 }
@@ -110,6 +114,7 @@ pub enum LSPSMessage {
 	Invalid,
 	LSPS0(LSPS0Message),
 	LSPS2(LSPS2Message),
+	LSPS1(LSPS1Message),
 }
 
 impl LSPSMessage {
@@ -127,6 +132,9 @@ impl LSPSMessage {
 				Some((request_id.0.clone(), request.method().to_string()))
 			}
 			LSPSMessage::LSPS2(LSPS2Message::Request(request_id, request)) => {
+				Some((request_id.0.clone(), request.method().to_string()))
+			}
+			LSPSMessage::LSPS1(LSPS1Message::Request(request_id, request)) => {
 				Some((request_id.0.clone(), request.method().to_string()))
 			}
 			_ => None,
@@ -164,6 +172,43 @@ impl Serialize for LSPSMessage {
 					}
 					LSPS0Response::ListProtocolsError(error) => {
 						jsonrpc_object.serialize_field(JSONRPC_ERROR_FIELD_KEY, error)?;
+					}
+				}
+			}
+			LSPSMessage::LSPS1(LSPS1Message::Request(request_id, request)) => {
+				jsonrpc_object.serialize_field(JSONRPC_ID_FIELD_KEY, &request_id.0)?;
+				jsonrpc_object.serialize_field(JSONRPC_METHOD_FIELD_KEY, request.method())?;
+
+				match request {
+					LSPS1Request::GetInfo(params) => {
+						jsonrpc_object.serialize_field(JSONRPC_PARAMS_FIELD_KEY, params)?
+					}
+					LSPS1Request::CreateOrder(params) => {
+						jsonrpc_object.serialize_field(JSONRPC_PARAMS_FIELD_KEY, params)?
+					}
+					LSPS1Request::GetOrder(params) => {
+						jsonrpc_object.serialize_field(JSONRPC_PARAMS_FIELD_KEY, params)?
+					}
+				}
+			}
+			LSPSMessage::LSPS1(LSPS1Message::Response(request_id, response)) => {
+				jsonrpc_object.serialize_field(JSONRPC_ID_FIELD_KEY, &request_id.0)?;
+
+				match response {
+					LSPS1Response::GetInfo(result) => {
+						jsonrpc_object.serialize_field(JSONRPC_RESULT_FIELD_KEY, result)?
+					}
+					LSPS1Response::CreateOrder(result) => {
+						jsonrpc_object.serialize_field(JSONRPC_ERROR_FIELD_KEY, result)?
+					}
+					LSPS1Response::CreateOrderError(error) => {
+						jsonrpc_object.serialize_field(JSONRPC_RESULT_FIELD_KEY, error)?
+					}
+					LSPS1Response::GetOrder(result) => {
+						jsonrpc_object.serialize_field(JSONRPC_ERROR_FIELD_KEY, result)?
+					}
+					LSPS1Response::GetOrderError(error) => {
+						jsonrpc_object.serialize_field(JSONRPC_ERROR_FIELD_KEY, &error)?
 					}
 				}
 			}
@@ -274,6 +319,30 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 						LSPS0Request::ListProtocols(ListProtocolsRequest {}),
 					)))
 				}
+				LSPS1_GET_INFO_METHOD_NAME => {
+					let request = serde_json::from_value(params.unwrap_or(json!({})))
+						.map_err(de::Error::custom)?;
+					Ok(LSPSMessage::LSPS1(LSPS1Message::Request(
+						RequestId(id),
+						LSPS1Request::GetInfo(request),
+					)))
+				}
+				LSPS1_CREATE_ORDER_METHOD_NAME => {
+					let request = serde_json::from_value(params.unwrap_or(json!({})))
+						.map_err(de::Error::custom)?;
+					Ok(LSPSMessage::LSPS1(LSPS1Message::Request(
+						RequestId(id),
+						LSPS1Request::CreateOrder(request),
+					)))
+				}
+				LSPS1_GET_ORDER_METHOD_NAME => {
+					let request = serde_json::from_value(params.unwrap_or(json!({})))
+						.map_err(de::Error::custom)?;
+					Ok(LSPSMessage::LSPS1(LSPS1Message::Request(
+						RequestId(id),
+						LSPS1Request::GetOrder(request),
+					)))
+				}
 				LSPS2_GET_VERSIONS_METHOD_NAME => {
 					let request = serde_json::from_value(params.unwrap_or(json!({})))
 						.map_err(de::Error::custom)?;
@@ -332,6 +401,40 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 							)))
 						} else {
 							Err(de::Error::custom("Received invalid lsps2.get_versions response."))
+						}
+					}
+					LSPS1_CREATE_ORDER_METHOD_NAME => {
+						if let Some(error) = error {
+							Ok(LSPSMessage::LSPS1(LSPS1Message::Response(
+								RequestId(id),
+								LSPS1Response::CreateOrderError(error),
+							)))
+						} else if let Some(result) = result {
+							let response =
+								serde_json::from_value(result).map_err(de::Error::custom)?;
+							Ok(LSPSMessage::LSPS1(LSPS1Message::Response(
+								RequestId(id),
+								LSPS1Response::CreateOrder(response),
+							)))
+						} else {
+							Err(de::Error::custom("Received invalid JSON-RPC object: one of method, result, or error required"))
+						}
+					}
+					LSPS1_GET_ORDER_METHOD_NAME => {
+						if let Some(error) = error {
+							Ok(LSPSMessage::LSPS1(LSPS1Message::Response(
+								RequestId(id),
+								LSPS1Response::GetOrderError(error),
+							)))
+						} else if let Some(result) = result {
+							let response =
+								serde_json::from_value(result).map_err(de::Error::custom)?;
+							Ok(LSPSMessage::LSPS1(LSPS1Message::Response(
+								RequestId(id),
+								LSPS1Response::GetOrder(response),
+							)))
+						} else {
+							Err(de::Error::custom("Received invalid JSON-RPC object: one of method, result, or error required"))
 						}
 					}
 					LSPS2_GET_INFO_METHOD_NAME => {
