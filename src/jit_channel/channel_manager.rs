@@ -224,7 +224,7 @@ impl OutboundJITChannelState {
 				compute_opening_fee(
 					expected_outbound_amount_msat,
 					opening_fee_params.min_fee_msat,
-					opening_fee_params.proportional,
+					opening_fee_params.proportional.into(),
 				).map(|opening_fee_msat| OutboundJITChannelState::PendingChannelOpen {
 					intercept_id,
 					opening_fee_msat,
@@ -994,7 +994,7 @@ where
 			match compute_opening_fee(
 				payment_size_msat,
 				params.opening_fee_params.min_fee_msat,
-				params.opening_fee_params.proportional,
+				params.opening_fee_params.proportional.into(),
 			) {
 				Some(opening_fee) => {
 					if opening_fee >= payment_size_msat {
