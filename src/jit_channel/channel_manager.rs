@@ -713,8 +713,10 @@ where
 					if let Some(jit_channel) = peer_state.outbound_channels_by_scid.get_mut(&scid) {
 						match jit_channel.channel_ready() {
 							Ok((htlcs, total_amt_to_forward_msat)) => {
-								let amounts_to_forward_msat =
-								calculate_amount_to_forward_per_htlc(&htlcs, total_amt_to_forward_msat);
+								let amounts_to_forward_msat = calculate_amount_to_forward_per_htlc(
+									&htlcs,
+									total_amt_to_forward_msat,
+								);
 
 								for (intercept_id, amount_to_forward_msat) in
 									amounts_to_forward_msat
@@ -1294,7 +1296,8 @@ fn calculate_amount_to_forward_per_htlc(
 	let mut per_htlc_forwards = vec![];
 
 	for (index, htlc) in htlcs.iter().enumerate() {
-		let proportional_fee_amt_msat = total_fee_msat * htlc.expected_outbound_amount_msat / total_received_msat;		
+		let proportional_fee_amt_msat =
+			total_fee_msat * htlc.expected_outbound_amount_msat / total_received_msat;
 
 		let mut actual_fee_amt_msat = std::cmp::min(fee_remaining_msat, proportional_fee_amt_msat);
 		fee_remaining_msat -= actual_fee_amt_msat;
@@ -1306,7 +1309,7 @@ fn calculate_amount_to_forward_per_htlc(
 		let amount_to_forward_msat = htlc.expected_outbound_amount_msat - actual_fee_amt_msat;
 
 		per_htlc_forwards.push((htlc.intercept_id, amount_to_forward_msat))
-	}	
+	}
 
 	per_htlc_forwards
 }
