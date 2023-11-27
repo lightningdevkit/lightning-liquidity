@@ -1289,23 +1289,26 @@ fn calculate_amount_to_forward_per_htlc(
 		htlcs.iter().map(|htlc| htlc.expected_outbound_amount_msat).sum();
 
 	let mut fee_remaining_msat = total_received_msat - total_amt_to_forward_msat;
+	let total_fee_msat = fee_remaining_msat;
 
-	let fee_percentage = fee_remaining_msat as f64 / total_received_msat as f64;
+	let mut per_htlc_forwards = vec![];
 
-	htlcs
-		.iter()
-		.map(|htlc| {
-			let proportional_fee_amt_msat =
-				(htlc.expected_outbound_amount_msat as f64 * fee_percentage).ceil() as u64;
-			let actual_fee_amt_msat = std::cmp::min(fee_remaining_msat, proportional_fee_amt_msat);
+	for (index, htlc) in htlcs.iter().enumerate() {
+		let proportional_fee_amt_msat = total_fee_msat * htlc.expected_outbound_amount_msat / total_received_msat;		
 
-			let amount_to_forward_msat = htlc.expected_outbound_amount_msat - actual_fee_amt_msat;
+		let mut actual_fee_amt_msat = std::cmp::min(fee_remaining_msat, proportional_fee_amt_msat);
+		fee_remaining_msat -= actual_fee_amt_msat;
 
-			fee_remaining_msat -= actual_fee_amt_msat;
+		if index == htlcs.len() - 1 {
+			actual_fee_amt_msat += fee_remaining_msat;
+		}
 
-			(htlc.intercept_id, amount_to_forward_msat)
-		})
-		.collect()
+		let amount_to_forward_msat = htlc.expected_outbound_amount_msat - actual_fee_amt_msat;
+
+		per_htlc_forwards.push((htlc.intercept_id, amount_to_forward_msat))
+	}	
+
+	per_htlc_forwards
 }
 
 #[cfg(test)]
@@ -1335,17 +1338,13 @@ mod tests {
 
 		let result = calculate_amount_to_forward_per_htlc(&htlcs, total_amt_to_forward_msat);
 
-		// 1000 in fees total, (1000 / 6000) 16.66% of each htlcs in fees
-		// 167 in fees from first
-		// 334 in fees from second
-		// 499 in fees from third
 		assert_eq!(result[0].0, htlcs[0].intercept_id);
-		assert_eq!(result[0].1, 833);
+		assert_eq!(result[0].1, 834);
 
 		assert_eq!(result[1].0, htlcs[1].intercept_id);
-		assert_eq!(result[1].1, 1666);
+		assert_eq!(result[1].1, 1667);
 
 		assert_eq!(result[2].0, htlcs[2].intercept_id);
-		assert_eq!(result[2].1, 2501);
+		assert_eq!(result[2].1, 2499);
 	}
 }
