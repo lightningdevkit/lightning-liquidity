@@ -142,8 +142,8 @@ pub struct LiquidityManager<
 	provider_config: Option<LiquidityProviderConfig>,
 	channel_manager: Arc<ChannelManager<M, T, ES, NS, SP, F, R, L>>,
 	chain_source: Option<C>,
-	genesis_hash: BlockHash,
-	best_block: RwLock<BestBlock>,
+	genesis_hash: Option<BlockHash>,
+	best_block: Option<RwLock<BestBlock>>,
 }
 
 impl<
@@ -183,7 +183,7 @@ where
 	pub fn new(
 		entropy_source: ES, provider_config: Option<LiquidityProviderConfig>,
 		channel_manager: Arc<ChannelManager<M, T, ES, NS, SP, F, R, L>>, chain_source: Option<C>,
-		chain_params: ChainParameters,
+		chain_params: Option<ChainParameters>,
 	) -> Self
 where {
 		let pending_messages = Arc::new(Mutex::new(vec![]));
@@ -229,8 +229,9 @@ where {
 			provider_config,
 			channel_manager,
 			chain_source,
-			genesis_hash: genesis_block(chain_params.network).header.block_hash(),
-			best_block: RwLock::new(chain_params.best_block),
+			genesis_hash: chain_params
+				.map(|chain_params| genesis_block(chain_params.network).header.block_hash()),
+			best_block: chain_params.map(|chain_params| RwLock::new(chain_params.best_block)),
 		}
 	}
 
@@ -684,8 +685,8 @@ where
 		&self, header: &bitcoin::BlockHeader, txdata: &chain::transaction::TransactionData,
 		height: u32,
 	) {
-		{
-			let best_block = self.best_block.read().unwrap();
+		if let Some(best_block) = &self.best_block {
+			let best_block = best_block.read().unwrap();
 			assert_eq!(best_block.block_hash(), header.prev_blockhash,
 			"Blocks must be connected in chain-order - the connected header must build on the last connected header");
 			assert_eq!(best_block.height(), height - 1,
@@ -698,8 +699,8 @@ where
 
 	fn block_disconnected(&self, header: &bitcoin::BlockHeader, height: u32) {
 		let new_height = height - 1;
-		{
-			let mut best_block = self.best_block.write().unwrap();
+		if let Some(best_block) = &self.best_block {
+			let mut best_block = best_block.write().unwrap();
 			assert_eq!(best_block.block_hash(), header.block_hash(),
 				"Blocks must be disconnected in chain-order - the disconnected header must be the last connected header");
 			assert_eq!(best_block.height(), height,
