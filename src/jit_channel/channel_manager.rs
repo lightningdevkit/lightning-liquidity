@@ -29,9 +29,9 @@ use lightning::util::logger::{Level, Logger};
 use crate::events::EventQueue;
 use crate::jit_channel::utils::{compute_opening_fee, is_valid_opening_fee_params};
 use crate::jit_channel::LSPS2Event;
-use crate::transport::message_handler::ProtocolMessageHandler;
-use crate::transport::msgs::{LSPSMessage, RequestId};
-use crate::{events::Event, transport::msgs::ResponseError};
+use crate::lsps0::message_handler::ProtocolMessageHandler;
+use crate::lsps0::msgs::{LSPSMessage, RequestId};
+use crate::{events::Event, lsps0::msgs::ResponseError};
 use crate::{utils, JITChannelsConfig};
 
 use crate::jit_channel::msgs::{

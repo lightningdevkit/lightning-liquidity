@@ -3,7 +3,7 @@
 use bitcoin::secp256k1::PublicKey;
 
 use super::msgs::{ChannelInfo, OptionsSupported, Order, OrderId, Payment};
-use crate::transport::msgs::RequestId;
+use crate::lsps0::msgs::RequestId;
 
 /// An "Event" which you should probably take some action in response to.
 #[derive(Clone, Debug, PartialEq, Eq)]

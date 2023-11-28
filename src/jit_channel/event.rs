@@ -10,7 +10,7 @@
 use bitcoin::secp256k1::PublicKey;
 
 use super::msgs::OpeningFeeParams;
-use crate::transport::msgs::RequestId;
+use crate::lsps0::msgs::RequestId;
 
 /// An event which you should probably take some action in response to.
 #[derive(Clone, Debug, PartialEq, Eq)]

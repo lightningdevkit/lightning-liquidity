@@ -6,7 +6,7 @@ use bitcoin::hashes::{Hash, HashEngine};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
-use crate::transport::msgs::{LSPSMessage, RequestId, ResponseError};
+use crate::lsps0::msgs::{LSPSMessage, RequestId, ResponseError};
 use crate::utils;
 
 pub(crate) const LSPS2_GET_VERSIONS_METHOD_NAME: &str = "lsps2.get_versions";

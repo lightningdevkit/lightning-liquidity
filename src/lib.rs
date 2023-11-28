@@ -22,10 +22,7 @@
 mod channel_request;
 pub mod events;
 pub mod jit_channel;
-mod transport;
+mod lsps0;
 mod utils;
 
-pub use transport::message_handler::{
-	JITChannelsConfig, LiquidityManager, LiquidityProviderConfig,
-};
-pub use transport::msgs::{RawLSPSMessage, LSPS_MESSAGE_TYPE_ID};
+pub use lsps0::message_handler::{JITChannelsConfig, LiquidityManager, LiquidityProviderConfig};

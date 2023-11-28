@@ -26,10 +26,10 @@ use lightning::util::errors::APIError;
 use lightning::util::logger::{Level, Logger};
 
 use crate::events::EventQueue;
-use crate::transport::message_handler::{CRChannelConfig, ProtocolMessageHandler};
-use crate::transport::msgs::{LSPSMessage, RequestId};
+use crate::lsps0::message_handler::{CRChannelConfig, ProtocolMessageHandler};
+use crate::lsps0::msgs::{LSPSMessage, RequestId};
 use crate::utils;
-use crate::{events::Event, transport::msgs::ResponseError};
+use crate::{events::Event, lsps0::msgs::ResponseError};
 
 use super::msgs::{
 	ChannelInfo, CreateOrderRequest, CreateOrderResponse, GetInfoRequest, GetInfoResponse,

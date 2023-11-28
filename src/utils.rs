@@ -2,7 +2,7 @@ use bitcoin::secp256k1::PublicKey;
 use lightning::sign::EntropySource;
 use std::{fmt::Write, ops::Deref};
 
-use crate::transport::msgs::RequestId;
+use crate::lsps0::msgs::RequestId;
 
 /// Maximum transaction index that can be used in a `short_channel_id`.
 /// This value is based on the 3-bytes available for tx index.

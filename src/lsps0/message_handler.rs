@@ -11,9 +11,9 @@ use {
 use crate::events::{Event, EventQueue};
 use crate::jit_channel::channel_manager::JITChannelManager;
 use crate::jit_channel::msgs::{OpeningFeeParams, RawOpeningFeeParams};
-use crate::transport::msgs::RequestId;
-use crate::transport::msgs::{LSPSMessage, RawLSPSMessage, LSPS_MESSAGE_TYPE_ID};
-use crate::transport::protocol::LSPS0MessageHandler;
+use crate::lsps0::msgs::RequestId;
+use crate::lsps0::msgs::{LSPSMessage, RawLSPSMessage, LSPS_MESSAGE_TYPE_ID};
+use crate::lsps0::protocol::LSPS0MessageHandler;
 
 use chrono::Utc;
 use lightning::chain::chaininterface::{BroadcasterInterface, FeeEstimator};
