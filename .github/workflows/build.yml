@@ -47,3 +47,5 @@ jobs:
         run: rustup component add rustfmt && cargo fmt --all -- --check
       - name: Test on Rust ${{ matrix.toolchain }}
         run: cargo test
+      - name: Test on Rust ${{ matrix.toolchain }} with LSPS1 support
+        run: RUSTFLAGS="--cfg lsps1" cargo test

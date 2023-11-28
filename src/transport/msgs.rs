@@ -1,3 +1,4 @@
+#[cfg(lsps1)]
 use crate::channel_request::msgs::{
 	LSPS1Message, LSPS1Request, LSPS1Response, LSPS1_CREATE_ORDER_METHOD_NAME,
 	LSPS1_GET_INFO_METHOD_NAME, LSPS1_GET_ORDER_METHOD_NAME,
@@ -97,8 +98,9 @@ impl TryFrom<LSPSMessage> for LSPS0Message {
 		match message {
 			LSPSMessage::Invalid => Err(()),
 			LSPSMessage::LSPS0(message) => Ok(message),
-			LSPSMessage::LSPS2(_) => Err(()),
+			#[cfg(lsps1)]
 			LSPSMessage::LSPS1(_) => Err(()),
+			LSPSMessage::LSPS2(_) => Err(()),
 		}
 	}
 }
@@ -113,8 +115,9 @@ impl From<LSPS0Message> for LSPSMessage {
 pub enum LSPSMessage {
 	Invalid,
 	LSPS0(LSPS0Message),
-	LSPS2(LSPS2Message),
+	#[cfg(lsps1)]
 	LSPS1(LSPS1Message),
+	LSPS2(LSPS2Message),
 }
 
 impl LSPSMessage {
@@ -131,10 +134,11 @@ impl LSPSMessage {
 			LSPSMessage::LSPS0(LSPS0Message::Request(request_id, request)) => {
 				Some((request_id.0.clone(), request.method().to_string()))
 			}
-			LSPSMessage::LSPS2(LSPS2Message::Request(request_id, request)) => {
+			#[cfg(lsps1)]
+			LSPSMessage::LSPS1(LSPS1Message::Request(request_id, request)) => {
 				Some((request_id.0.clone(), request.method().to_string()))
 			}
-			LSPSMessage::LSPS1(LSPS1Message::Request(request_id, request)) => {
+			LSPSMessage::LSPS2(LSPS2Message::Request(request_id, request)) => {
 				Some((request_id.0.clone(), request.method().to_string()))
 			}
 			_ => None,
@@ -175,6 +179,7 @@ impl Serialize for LSPSMessage {
 					}
 				}
 			}
+			#[cfg(lsps1)]
 			LSPSMessage::LSPS1(LSPS1Message::Request(request_id, request)) => {
 				jsonrpc_object.serialize_field(JSONRPC_ID_FIELD_KEY, &request_id.0)?;
 				jsonrpc_object.serialize_field(JSONRPC_METHOD_FIELD_KEY, request.method())?;
@@ -191,6 +196,7 @@ impl Serialize for LSPSMessage {
 					}
 				}
 			}
+			#[cfg(lsps1)]
 			LSPSMessage::LSPS1(LSPS1Message::Response(request_id, response)) => {
 				jsonrpc_object.serialize_field(JSONRPC_ID_FIELD_KEY, &request_id.0)?;
 
@@ -319,6 +325,7 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 						LSPS0Request::ListProtocols(ListProtocolsRequest {}),
 					)))
 				}
+				#[cfg(lsps1)]
 				LSPS1_GET_INFO_METHOD_NAME => {
 					let request = serde_json::from_value(params.unwrap_or(json!({})))
 						.map_err(de::Error::custom)?;
@@ -327,6 +334,7 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 						LSPS1Request::GetInfo(request),
 					)))
 				}
+				#[cfg(lsps1)]
 				LSPS1_CREATE_ORDER_METHOD_NAME => {
 					let request = serde_json::from_value(params.unwrap_or(json!({})))
 						.map_err(de::Error::custom)?;
@@ -335,6 +343,7 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 						LSPS1Request::CreateOrder(request),
 					)))
 				}
+				#[cfg(lsps1)]
 				LSPS1_GET_ORDER_METHOD_NAME => {
 					let request = serde_json::from_value(params.unwrap_or(json!({})))
 						.map_err(de::Error::custom)?;
@@ -403,6 +412,7 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 							Err(de::Error::custom("Received invalid lsps2.get_versions response."))
 						}
 					}
+					#[cfg(lsps1)]
 					LSPS1_CREATE_ORDER_METHOD_NAME => {
 						if let Some(error) = error {
 							Ok(LSPSMessage::LSPS1(LSPS1Message::Response(
@@ -420,6 +430,7 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 							Err(de::Error::custom("Received invalid JSON-RPC object: one of method, result, or error required"))
 						}
 					}
+					#[cfg(lsps1)]
 					LSPS1_GET_ORDER_METHOD_NAME => {
 						if let Some(error) = error {
 							Ok(LSPSMessage::LSPS1(LSPS1Message::Response(

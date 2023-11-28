@@ -1,8 +1,13 @@
 #![allow(missing_docs)]
-use crate::channel_request::channel_manager::CRManager;
-use crate::channel_request::msgs::{
-	ChannelInfo, OptionsSupported, Order, OrderId, OrderState, Payment,
+
+#[cfg(lsps1)]
+use {
+	crate::channel_request::channel_manager::CRManager,
+	crate::channel_request::msgs::{
+		ChannelInfo, OptionsSupported, Order, OrderId, OrderState, Payment,
+	},
 };
+
 use crate::events::{Event, EventQueue};
 use crate::jit_channel::channel_manager::JITChannelManager;
 use crate::jit_channel::msgs::{OpeningFeeParams, RawOpeningFeeParams};
@@ -57,6 +62,7 @@ pub(crate) trait ProtocolMessageHandler {
 /// to provide liquidity services to clients.
 pub struct LiquidityProviderConfig {
 	/// LSPS1 Configuration
+	#[cfg(lsps1)]
 	pub lsps1_config: Option<CRChannelConfig>,
 	/// Optional configuration for JIT channels
 	/// should you want to support them.
@@ -75,6 +81,7 @@ pub struct JITChannelsConfig {
 	pub max_payment_size_msat: u64,
 }
 
+#[cfg(lsps1)]
 pub struct CRChannelConfig {
 	pub token: Option<String>,
 	pub max_fees: Option<u64>,
@@ -135,6 +142,7 @@ pub struct LiquidityManager<
 	pending_events: Arc<EventQueue>,
 	request_id_to_method_map: Mutex<HashMap<String, String>>,
 	lsps0_message_handler: LSPS0MessageHandler<ES>,
+	#[cfg(lsps1)]
 	lsps1_message_handler:
 		Option<CRManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, CMH, NS>>,
 	lsps2_message_handler:
@@ -207,6 +215,7 @@ where {
 			})
 		});
 
+		#[cfg(lsps1)]
 		let lsps1_message_handler = provider_config.as_ref().and_then(|config| {
 			config.lsps1_config.as_ref().map(|lsps1_config| {
 				CRManager::new(
@@ -224,6 +233,7 @@ where {
 			pending_events,
 			request_id_to_method_map: Mutex::new(HashMap::new()),
 			lsps0_message_handler,
+			#[cfg(lsps1)]
 			lsps1_message_handler,
 			lsps2_message_handler,
 			provider_config,
@@ -261,6 +271,7 @@ where {
 	pub fn set_peer_manager(
 		&self, peer_manager: Arc<PeerManager<Descriptor, CM, RM, OM, L, CMH, NS>>,
 	) {
+		#[cfg(lsps1)]
 		if let Some(lsps1_message_handler) = &self.lsps1_message_handler {
 			lsps1_message_handler.set_peer_manager(peer_manager.clone());
 		}
@@ -269,6 +280,7 @@ where {
 		}
 	}
 
+	#[cfg(lsps1)]
 	pub fn request_for_info(
 		&self, counterparty_node_id: PublicKey, channel_id: u128,
 	) -> Result<(), APIError> {
@@ -278,6 +290,7 @@ where {
 		Ok(())
 	}
 
+	#[cfg(lsps1)]
 	pub fn place_order(
 		&self, channel_id: u128, counterparty_node_id: &PublicKey, order: Order,
 	) -> Result<(), APIError> {
@@ -287,6 +300,7 @@ where {
 		Ok(())
 	}
 
+	#[cfg(lsps1)]
 	pub fn send_invoice_for_order(
 		&self, request_id: RequestId, counterparty_node_id: &PublicKey, payment: Payment,
 		created_at: chrono::DateTime<Utc>, expires_at: chrono::DateTime<Utc>,
@@ -303,6 +317,7 @@ where {
 		Ok(())
 	}
 
+	#[cfg(lsps1)]
 	pub fn check_order_status(
 		self, channel_id: u128, counterparty_node_id: &PublicKey, order_id: OrderId,
 	) -> Result<(), APIError> {
@@ -312,6 +327,7 @@ where {
 		Ok(())
 	}
 
+	#[cfg(lsps1)]
 	pub fn update_order_status(
 		&self, request_id: RequestId, counterparty_node_id: PublicKey, order_id: OrderId,
 		order_state: OrderState, channel: Option<ChannelInfo>,
@@ -508,6 +524,7 @@ where {
 			LSPSMessage::LSPS0(msg) => {
 				self.lsps0_message_handler.handle_message(msg, sender_node_id)?;
 			}
+			#[cfg(lsps1)]
 			LSPSMessage::LSPS1(msg) => match &self.lsps1_message_handler {
 				Some(lsps1_message_handler) => {
 					lsps1_message_handler.handle_message(msg, sender_node_id)?;
