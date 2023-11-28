@@ -361,6 +361,24 @@ where {
 		}
 	}
 
+	/// Used by LSP to inform a client requesting a JIT Channel the token they used is invalid.
+	///
+	/// Should be called in response to receiving a [`LSPS2Event::GetInfo`] event.
+	///
+	/// [`LSPS2Event::GetInfo`]: crate::jit_channel::LSPS2Event::GetInfo
+	pub fn invalid_token_provided(
+		&self, counterparty_node_id: PublicKey, request_id: RequestId,
+	) -> Result<(), APIError> {
+		if let Some(lsps2_message_handler) = &self.lsps2_message_handler {
+			lsps2_message_handler.invalid_token_provided(counterparty_node_id, request_id)
+		} else {
+			Err(APIError::APIMisuseError {
+				err: "JIT Channels were not configured when LSPManager was instantiated"
+					.to_string(),
+			})
+		}
+	}
+
 	/// Used by LSP to provide fee parameters to a client requesting a JIT Channel.
 	///
 	/// Should be called in response to receiving a [`LSPS2Event::GetInfo`] event.

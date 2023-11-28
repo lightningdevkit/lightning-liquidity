@@ -13,6 +13,9 @@ pub(crate) const LSPS2_GET_VERSIONS_METHOD_NAME: &str = "lsps2.get_versions";
 pub(crate) const LSPS2_GET_INFO_METHOD_NAME: &str = "lsps2.get_info";
 pub(crate) const LSPS2_BUY_METHOD_NAME: &str = "lsps2.buy";
 
+pub(crate) const LSPS2_GET_INFO_REQUEST_INVALID_VERSION_ERROR_CODE: i32 = 1;
+pub(crate) const LSPS2_GET_INFO_REQUEST_UNRECOGNIZED_OR_STALE_TOKEN_ERROR_CODE: i32 = 2;
+
 pub(crate) const LSPS2_BUY_REQUEST_INVALID_VERSION_ERROR_CODE: i32 = 1;
 pub(crate) const LSPS2_BUY_REQUEST_INVALID_OPENING_FEE_PARAMS_ERROR_CODE: i32 = 2;
 pub(crate) const LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_SMALL_ERROR_CODE: i32 = 3;
