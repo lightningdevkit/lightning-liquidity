@@ -6,9 +6,9 @@
 // <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your option.
 // You may not use this file except in accordance with one or both of these
 // licenses.
-#![crate_name = "ldk_lsp_client"]
+#![crate_name = "lightning_liquidity"]
 
-//! # ldk-lsp-client
+//! # `lightning-liquidity`
 //! Types and primitives to integrate a spec-compliant LSP with an LDK-based node.
 #![deny(missing_docs)]
 #![deny(broken_intra_doc_links)]
