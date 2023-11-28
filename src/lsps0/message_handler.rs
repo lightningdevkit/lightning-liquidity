@@ -7,11 +7,11 @@ use {
 };
 
 use crate::events::{Event, EventQueue};
-use crate::jit_channel::channel_manager::JITChannelManager;
-use crate::jit_channel::msgs::{OpeningFeeParams, RawOpeningFeeParams};
 use crate::lsps0::msgs::RequestId;
 use crate::lsps0::msgs::{LSPSMessage, RawLSPSMessage, LSPS_MESSAGE_TYPE_ID};
 use crate::lsps0::protocol::LSPS0MessageHandler;
+use crate::lsps2::channel_manager::JITChannelManager;
+use crate::lsps2::msgs::{OpeningFeeParams, RawOpeningFeeParams};
 
 use chrono::Utc;
 use lightning::chain::chaininterface::{BroadcasterInterface, FeeEstimator};
@@ -64,7 +64,7 @@ pub struct LiquidityProviderConfig {
 	pub lsps1_config: Option<CRChannelConfig>,
 	/// Optional configuration for JIT channels
 	/// should you want to support them.
-	pub jit_channels: Option<JITChannelsConfig>,
+	pub lsps2_config: Option<JITChannelsConfig>,
 }
 
 /// Configuration options for JIT channels.
@@ -202,10 +202,10 @@ where {
 		);
 
 		let lsps2_message_handler = provider_config.as_ref().and_then(|config| {
-			config.jit_channels.as_ref().map(|jit_channels_config| {
+			config.lsps2_config.as_ref().map(|config| {
 				JITChannelManager::new(
 					entropy_source.clone(),
-					jit_channels_config,
+					config,
 					Arc::clone(&pending_messages),
 					Arc::clone(&pending_events),
 					Arc::clone(&channel_manager),
@@ -355,7 +355,7 @@ where {
 	///
 	/// `token` is an optional String that will be provided to the LSP.
 	/// It can be used by the LSP as an API key, coupon code, or some other way to identify a user.
-	pub fn jit_channel_create_invoice(
+	pub fn lsps2_create_invoice(
 		&self, counterparty_node_id: PublicKey, payment_size_msat: Option<u64>,
 		token: Option<String>, user_channel_id: u128,
 	) -> Result<(), APIError> {
@@ -379,7 +379,7 @@ where {
 	///
 	/// Should be called in response to receiving a [`LSPS2Event::GetInfo`] event.
 	///
-	/// [`LSPS2Event::GetInfo`]: crate::jit_channel::LSPS2Event::GetInfo
+	/// [`LSPS2Event::GetInfo`]: crate::lsps2::LSPS2Event::GetInfo
 	pub fn invalid_token_provided(
 		&self, counterparty_node_id: PublicKey, request_id: RequestId,
 	) -> Result<(), APIError> {
@@ -397,7 +397,7 @@ where {
 	///
 	/// Should be called in response to receiving a [`LSPS2Event::GetInfo`] event.
 	///
-	/// [`LSPS2Event::GetInfo`]: crate::jit_channel::LSPS2Event::GetInfo
+	/// [`LSPS2Event::GetInfo`]: crate::lsps2::LSPS2Event::GetInfo
 	pub fn opening_fee_params_generated(
 		&self, counterparty_node_id: PublicKey, request_id: RequestId,
 		opening_fee_params_menu: Vec<RawOpeningFeeParams>,
@@ -422,7 +422,7 @@ where {
 	///
 	/// Should be called in response to receiving a [`LSPS2Event::GetInfoResponse`] event.
 	///
-	/// [`LSPS2Event::GetInfoResponse`]: crate::jit_channel::LSPS2Event::GetInfoResponse
+	/// [`LSPS2Event::GetInfoResponse`]: crate::lsps2::LSPS2Event::GetInfoResponse
 	pub fn opening_fee_params_selected(
 		&self, counterparty_node_id: PublicKey, channel_id: u128,
 		opening_fee_params: OpeningFeeParams,
@@ -445,7 +445,7 @@ where {
 	///
 	/// Should be called in response to receiving a [`LSPS2Event::BuyRequest`] event.
 	///
-	/// [`LSPS2Event::BuyRequest`]: crate::jit_channel::LSPS2Event::BuyRequest
+	/// [`LSPS2Event::BuyRequest`]: crate::lsps2::LSPS2Event::BuyRequest
 	pub fn invoice_parameters_generated(
 		&self, counterparty_node_id: PublicKey, request_id: RequestId, scid: u64,
 		cltv_expiry_delta: u32, client_trusts_lsp: bool,
@@ -477,7 +477,7 @@ where {
 	/// Will do nothing if the scid does not match any of the ones we gave out.
 	///
 	/// [`Event::HTLCIntercepted`]: lightning::events::Event::HTLCIntercepted
-	/// [`LSPS2Event::OpenChannel`]: crate::jit_channel::LSPS2Event::OpenChannel
+	/// [`LSPS2Event::OpenChannel`]: crate::lsps2::LSPS2Event::OpenChannel
 	pub fn htlc_intercepted(
 		&self, scid: u64, intercept_id: InterceptId, expected_outbound_amount_msat: u64,
 	) -> Result<(), APIError> {

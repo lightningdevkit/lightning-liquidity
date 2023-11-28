@@ -150,7 +150,7 @@ impl JitChannelScid {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct BuyResponse {
 	/// The short channel id used by LSP to identify need to open channel.
-	pub jit_channel_scid: JitChannelScid,
+	pub lsps2_scid: JitChannelScid,
 	/// The locktime expiry delta the lsp requires.
 	pub lsp_cltv_expiry_delta: u32,
 	/// A flag that indicates who is trusting who.
@@ -225,7 +225,7 @@ impl From<LSPS2Message> for LSPSMessage {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::jit_channel::utils::is_valid_opening_fee_params;
+	use crate::lsps2::utils::is_valid_opening_fee_params;
 
 	#[test]
 	fn into_opening_fee_params_produces_valid_promise() {

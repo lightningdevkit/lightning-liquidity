@@ -19,10 +19,10 @@
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
 pub mod events;
-pub mod jit_channel;
 mod lsps0;
 #[cfg(lsps1)]
 mod lsps1;
+pub mod lsps2;
 mod utils;
 
 pub use lsps0::message_handler::{JITChannelsConfig, LiquidityManager, LiquidityProviderConfig};

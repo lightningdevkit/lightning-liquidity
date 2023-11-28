@@ -49,7 +49,7 @@ pub enum LSPS2Event {
 		/// It needs to be passed to [`LiquidityManager::opening_fee_params_selected`].
 		///
 		/// [`LiquidityManager::opening_fee_params_selected`]: crate::LiquidityManager::opening_fee_params_selected
-		jit_channel_id: u128,
+		lsps2_id: u128,
 		/// The node id of the LSP that provided this response.
 		counterparty_node_id: PublicKey,
 		/// The menu of fee parameters the LSP is offering at this time.
@@ -59,9 +59,9 @@ pub enum LSPS2Event {
 		min_payment_size_msat: u64,
 		/// The max payment size allowed when opening the channel.
 		max_payment_size_msat: u64,
-		/// The user_channel_id value passed in to [`LiquidityManager::jit_channel_create_invoice`].
+		/// The user_channel_id value passed in to [`LiquidityManager::lsps2_create_invoice`].
 		///
-		/// [`LiquidityManager::jit_channel_create_invoice`]: crate::LiquidityManager::jit_channel_create_invoice
+		/// [`LiquidityManager::lsps2_create_invoice`]: crate::LiquidityManager::lsps2_create_invoice
 		user_channel_id: u128,
 	},
 	/// A client has selected a opening fee parameter to use and would like to
@@ -103,9 +103,9 @@ pub enum LSPS2Event {
 		payment_size_msat: Option<u64>,
 		/// The trust model the LSP expects.
 		client_trusts_lsp: bool,
-		/// The `user_channel_id` value passed in to [`LiquidityManager::jit_channel_create_invoice`].
+		/// The `user_channel_id` value passed in to [`LiquidityManager::lsps2_create_invoice`].
 		///
-		/// [`LiquidityManager::jit_channel_create_invoice`]: crate::LiquidityManager::jit_channel_create_invoice
+		/// [`LiquidityManager::lsps2_create_invoice`]: crate::LiquidityManager::lsps2_create_invoice
 		user_channel_id: u128,
 	},
 	/// You should open a channel using [`ChannelManager::create_channel`].
