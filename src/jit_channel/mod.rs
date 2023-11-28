@@ -17,3 +17,4 @@ pub(crate) mod utils;
 
 pub use event::LSPS2Event;
 pub use msgs::{BuyResponse, GetInfoResponse, OpeningFeeParams, RawOpeningFeeParams};
+pub use utils::compute_opening_fee;
