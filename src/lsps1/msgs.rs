@@ -3,7 +3,7 @@ use std::convert::TryFrom;
 
 use serde::{Deserialize, Serialize};
 
-use crate::transport::msgs::{LSPSMessage, RequestId, ResponseError};
+use crate::lsps0::msgs::{LSPSMessage, RequestId, ResponseError};
 
 pub(crate) const LSPS1_GET_INFO_METHOD_NAME: &str = "lsps1.get_info";
 pub(crate) const LSPS1_CREATE_ORDER_METHOD_NAME: &str = "lsps1.create_order";

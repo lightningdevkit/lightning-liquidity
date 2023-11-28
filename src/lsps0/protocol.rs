@@ -5,8 +5,8 @@ use lightning::util::logger::Level;
 use std::ops::Deref;
 use std::sync::{Arc, Mutex};
 
-use crate::transport::message_handler::ProtocolMessageHandler;
-use crate::transport::msgs::{
+use crate::lsps0::message_handler::ProtocolMessageHandler;
+use crate::lsps0::msgs::{
 	LSPS0Message, LSPS0Request, LSPS0Response, LSPSMessage, ListProtocolsRequest,
 	ListProtocolsResponse, RequestId, ResponseError,
 };

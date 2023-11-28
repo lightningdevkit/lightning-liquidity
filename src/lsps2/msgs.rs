@@ -6,7 +6,7 @@ use bitcoin::hashes::{Hash, HashEngine};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
-use crate::transport::msgs::{LSPSMessage, RequestId, ResponseError};
+use crate::lsps0::msgs::{LSPSMessage, RequestId, ResponseError};
 use crate::utils;
 
 pub(crate) const LSPS2_GET_VERSIONS_METHOD_NAME: &str = "lsps2.get_versions";
@@ -225,7 +225,7 @@ impl From<LSPS2Message> for LSPSMessage {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::jit_channel::utils::is_valid_opening_fee_params;
+	use crate::lsps2::utils::is_valid_opening_fee_params;
 
 	#[test]
 	fn into_opening_fee_params_produces_valid_promise() {

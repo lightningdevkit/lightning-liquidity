@@ -13,23 +13,19 @@ use std::ops::Deref;
 use std::sync::{Arc, Mutex, RwLock};
 
 use bitcoin::secp256k1::PublicKey;
-use lightning::chain;
-use lightning::chain::chaininterface::{BroadcasterInterface, FeeEstimator};
-use lightning::ln::channelmanager::ChannelManager;
-use lightning::ln::msgs::{
-	ChannelMessageHandler, ErrorAction, LightningError, OnionMessageHandler, RoutingMessageHandler,
-};
-use lightning::ln::peer_handler::{CustomMessageHandler, PeerManager, SocketDescriptor};
-use lightning::routing::router::Router;
-use lightning::sign::{EntropySource, NodeSigner, SignerProvider};
+use lightning::chain::Filter;
+use lightning::ln::channelmanager::AChannelManager;
+use lightning::ln::msgs::{ErrorAction, LightningError};
+use lightning::ln::peer_handler::APeerManager;
+use lightning::sign::EntropySource;
 use lightning::util::errors::APIError;
-use lightning::util::logger::{Level, Logger};
+use lightning::util::logger::Level;
 
 use crate::events::EventQueue;
-use crate::transport::message_handler::{CRChannelConfig, ProtocolMessageHandler};
-use crate::transport::msgs::{LSPSMessage, RequestId};
+use crate::lsps0::message_handler::{CRChannelConfig, ProtocolMessageHandler};
+use crate::lsps0::msgs::{LSPSMessage, RequestId};
 use crate::utils;
-use crate::{events::Event, transport::msgs::ResponseError};
+use crate::{events::Event, lsps0::msgs::ResponseError};
 
 use super::msgs::{
 	ChannelInfo, CreateOrderRequest, CreateOrderResponse, GetInfoRequest, GetInfoResponse,
@@ -276,37 +272,17 @@ impl PeerState {
 	}
 }
 
-pub struct CRManager<
-	ES: Deref,
-	M: Deref,
-	T: Deref,
-	F: Deref,
-	R: Deref,
-	SP: Deref,
-	Descriptor: SocketDescriptor,
-	L: Deref,
-	RM: Deref,
-	CM: Deref,
-	OM: Deref,
-	CMH: Deref,
-	NS: Deref,
-> where
+pub struct CRManager<ES: Deref, CM: Deref + Clone, PM: Deref + Clone, C: Deref>
+where
 	ES::Target: EntropySource,
-	M::Target: chain::Watch<<SP::Target as SignerProvider>::Signer>,
-	T::Target: BroadcasterInterface,
-	F::Target: FeeEstimator,
-	R::Target: Router,
-	SP::Target: SignerProvider,
-	L::Target: Logger,
-	RM::Target: RoutingMessageHandler,
-	CM::Target: ChannelMessageHandler,
-	OM::Target: OnionMessageHandler,
-	CMH::Target: CustomMessageHandler,
-	NS::Target: NodeSigner,
+	CM::Target: AChannelManager,
+	PM::Target: APeerManager,
+	C::Target: Filter,
 {
 	entropy_source: ES,
-	peer_manager: Mutex<Option<Arc<PeerManager<Descriptor, CM, RM, OM, L, CMH, NS>>>>,
-	channel_manager: Arc<ChannelManager<M, T, ES, NS, SP, F, R, L>>,
+	channel_manager: CM,
+	peer_manager: Mutex<Option<PM>>,
+	chain_source: Option<C>,
 	pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
 	pending_events: Arc<EventQueue>,
 	per_peer_state: RwLock<HashMap<PublicKey, Mutex<PeerState>>>,
@@ -315,57 +291,34 @@ pub struct CRManager<
 	max_fees: Option<u64>,
 }
 
-impl<
-		ES: Deref,
-		M: Deref,
-		T: Deref,
-		F: Deref,
-		R: Deref,
-		SP: Deref,
-		Descriptor: SocketDescriptor,
-		L: Deref,
-		RM: Deref,
-		CM: Deref,
-		OM: Deref,
-		CMH: Deref,
-		NS: Deref,
-	> CRManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, CMH, NS>
+impl<ES: Deref, CM: Deref + Clone, PM: Deref + Clone, C: Deref> CRManager<ES, CM, PM, C>
 where
 	ES::Target: EntropySource,
-	M::Target: chain::Watch<<SP::Target as SignerProvider>::Signer>,
-	T::Target: BroadcasterInterface,
-	F::Target: FeeEstimator,
-	R::Target: Router,
-	SP::Target: SignerProvider,
-	L::Target: Logger,
-	RM::Target: RoutingMessageHandler,
-	CM::Target: ChannelMessageHandler,
-	OM::Target: OnionMessageHandler,
-	CMH::Target: CustomMessageHandler,
-	NS::Target: NodeSigner,
+	CM::Target: AChannelManager,
+	PM::Target: APeerManager,
+	C::Target: Filter,
+	ES::Target: EntropySource,
 {
 	pub(crate) fn new(
 		entropy_source: ES, config: &CRChannelConfig,
 		pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
-		pending_events: Arc<EventQueue>,
-		channel_manager: Arc<ChannelManager<M, T, ES, NS, SP, F, R, L>>,
+		pending_events: Arc<EventQueue>, channel_manager: CM, chain_source: Option<C>,
 	) -> Self {
 		Self {
 			entropy_source,
+			channel_manager,
+			peer_manager: Mutex::new(None),
+			chain_source,
 			pending_messages,
 			pending_events,
 			per_peer_state: RwLock::new(HashMap::new()),
-			peer_manager: Mutex::new(None),
-			channel_manager,
 			options_config: config.options_supported.clone(),
 			website: config.website.clone(),
 			max_fees: config.max_fees,
 		}
 	}
 
-	pub fn set_peer_manager(
-		&self, peer_manager: Arc<PeerManager<Descriptor, CM, RM, OM, L, CMH, NS>>,
-	) {
+	pub fn set_peer_manager(&self, peer_manager: PM) {
 		*self.peer_manager.lock().unwrap() = Some(peer_manager);
 	}
 
@@ -391,7 +344,7 @@ where
 		}
 
 		if let Some(peer_manager) = self.peer_manager.lock().unwrap().as_ref() {
-			peer_manager.process_events();
+			peer_manager.as_ref().process_events();
 		}
 	}
 
@@ -515,7 +468,7 @@ where
 					));
 				}
 				if let Some(peer_manager) = self.peer_manager.lock().unwrap().as_ref() {
-					peer_manager.process_events();
+					peer_manager.as_ref().process_events();
 				}
 			}
 			None => {
@@ -780,7 +733,7 @@ where
 						));
 					}
 					if let Some(peer_manager) = self.peer_manager.lock().unwrap().as_ref() {
-						peer_manager.process_events();
+						peer_manager.as_ref().process_events();
 					}
 				} else {
 					return Err(APIError::APIMisuseError {
@@ -980,7 +933,7 @@ where
 		}
 
 		if let Some(peer_manager) = self.peer_manager.lock().unwrap().as_ref() {
-			peer_manager.process_events();
+			peer_manager.as_ref().process_events();
 		}
 	}
 
@@ -1006,34 +959,13 @@ where
 	}
 }
 
-impl<
-		ES: Deref,
-		M: Deref,
-		T: Deref,
-		F: Deref,
-		R: Deref,
-		SP: Deref,
-		Descriptor: SocketDescriptor,
-		L: Deref,
-		RM: Deref,
-		CM: Deref,
-		OM: Deref,
-		CMH: Deref,
-		NS: Deref,
-	> ProtocolMessageHandler for CRManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, CMH, NS>
+impl<ES: Deref, CM: Deref + Clone, PM: Deref + Clone, C: Deref> ProtocolMessageHandler
+	for CRManager<ES, CM, PM, C>
 where
 	ES::Target: EntropySource,
-	M::Target: chain::Watch<<SP::Target as SignerProvider>::Signer>,
-	T::Target: BroadcasterInterface,
-	F::Target: FeeEstimator,
-	R::Target: Router,
-	SP::Target: SignerProvider,
-	L::Target: Logger,
-	RM::Target: RoutingMessageHandler,
-	CM::Target: ChannelMessageHandler,
-	OM::Target: OnionMessageHandler,
-	CMH::Target: CustomMessageHandler,
-	NS::Target: NodeSigner,
+	CM::Target: AChannelManager,
+	PM::Target: APeerManager,
+	C::Target: Filter,
 {
 	type ProtocolMessage = LSPS1Message;
 	const PROTOCOL_NUMBER: Option<u16> = Some(2);

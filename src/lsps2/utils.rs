@@ -5,7 +5,7 @@ use bitcoin::hashes::{Hash, HashEngine};
 use std::convert::TryInto;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::jit_channel::msgs::OpeningFeeParams;
+use crate::lsps2::msgs::OpeningFeeParams;
 use crate::utils;
 
 /// Determines if the given parameters are valid given the secret used to generate the promise.

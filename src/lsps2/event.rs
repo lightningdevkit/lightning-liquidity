@@ -10,7 +10,7 @@
 use bitcoin::secp256k1::PublicKey;
 
 use super::msgs::OpeningFeeParams;
-use crate::transport::msgs::RequestId;
+use crate::lsps0::msgs::RequestId;
 
 /// An event which you should probably take some action in response to.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -59,9 +59,9 @@ pub enum LSPS2Event {
 		min_payment_size_msat: u64,
 		/// The max payment size allowed when opening the channel.
 		max_payment_size_msat: u64,
-		/// The user_channel_id value passed in to [`LiquidityManager::jit_channel_create_invoice`].
+		/// The user_channel_id value passed in to [`LiquidityManager::lsps2_create_invoice`].
 		///
-		/// [`LiquidityManager::jit_channel_create_invoice`]: crate::LiquidityManager::jit_channel_create_invoice
+		/// [`LiquidityManager::lsps2_create_invoice`]: crate::LiquidityManager::lsps2_create_invoice
 		user_channel_id: u128,
 	},
 	/// A client has selected a opening fee parameter to use and would like to
@@ -103,9 +103,9 @@ pub enum LSPS2Event {
 		payment_size_msat: Option<u64>,
 		/// The trust model the LSP expects.
 		client_trusts_lsp: bool,
-		/// The `user_channel_id` value passed in to [`LiquidityManager::jit_channel_create_invoice`].
+		/// The `user_channel_id` value passed in to [`LiquidityManager::lsps2_create_invoice`].
 		///
-		/// [`LiquidityManager::jit_channel_create_invoice`]: crate::LiquidityManager::jit_channel_create_invoice
+		/// [`LiquidityManager::lsps2_create_invoice`]: crate::LiquidityManager::lsps2_create_invoice
 		user_channel_id: u128,
 	},
 	/// You should open a channel using [`ChannelManager::create_channel`].

@@ -18,14 +18,11 @@
 #![allow(clippy::drop_non_drop)]
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
-mod channel_request;
 pub mod events;
-pub mod jit_channel;
-mod transport;
+mod lsps0;
+#[cfg(lsps1)]
+mod lsps1;
+pub mod lsps2;
 mod utils;
 
-pub use channel_request::event::Event as LSPS1Event;
-pub use transport::message_handler::{
-	JITChannelsConfig, LiquidityManager, LiquidityProviderConfig,
-};
-pub use transport::msgs::{RawLSPSMessage, LSPS_MESSAGE_TYPE_ID};
+pub use lsps0::message_handler::{JITChannelsConfig, LiquidityManager, LiquidityProviderConfig};
