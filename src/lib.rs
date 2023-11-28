@@ -11,8 +11,8 @@
 //! # `lightning-liquidity`
 //! Types and primitives to integrate a spec-compliant LSP with an LDK-based node.
 #![deny(missing_docs)]
-#![deny(broken_intra_doc_links)]
-#![deny(private_intra_doc_links)]
+#![deny(rustdoc::broken_intra_doc_links)]
+#![deny(rustdoc::private_intra_doc_links)]
 #![allow(bare_trait_objects)]
 #![allow(ellipsis_inclusive_range_patterns)]
 #![allow(clippy::drop_non_drop)]
