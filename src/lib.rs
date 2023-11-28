@@ -17,12 +17,33 @@
 #![allow(ellipsis_inclusive_range_patterns)]
 #![allow(clippy::drop_non_drop)]
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
+#[cfg(not(any(feature = "std", feature = "no-std")))]
+compile_error!("at least one of the `std` or `no-std` features must be enabled");
+
+#[macro_use]
+extern crate alloc;
+
+mod prelude {
+	#[cfg(feature = "hashbrown")]
+	extern crate hashbrown;
+
+	#[cfg(feature = "hashbrown")]
+	pub use self::hashbrown::{hash_map, HashMap, HashSet};
+	pub use alloc::{boxed::Box, collections::VecDeque, string::String, vec, vec::Vec};
+	#[cfg(not(feature = "hashbrown"))]
+	pub use std::collections::{hash_map, HashMap, HashSet};
+
+	pub use alloc::borrow::ToOwned;
+	pub use alloc::string::ToString;
+}
 
 pub mod events;
 mod lsps0;
 #[cfg(lsps1)]
 mod lsps1;
 pub mod lsps2;
+mod sync;
 mod utils;
 
 pub use lsps0::message_handler::{JITChannelsConfig, LiquidityManager, LiquidityProviderConfig};

@@ -1,4 +1,4 @@
-use std::convert::TryFrom;
+use core::convert::TryFrom;
 
 use bitcoin::hashes::hmac::{Hmac, HmacEngine};
 use bitcoin::hashes::sha256::Hash as Sha256;
@@ -7,6 +7,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::lsps0::msgs::{LSPSMessage, RequestId, ResponseError};
+use crate::prelude::{String, Vec};
 use crate::utils;
 
 pub(crate) const LSPS2_GET_VERSIONS_METHOD_NAME: &str = "lsps2.get_versions";
@@ -304,6 +305,8 @@ mod tests {
 	}
 
 	#[test]
+	#[cfg(feature = "std")]
+	// TODO: We need to find a way to check expiry times in no-std builds.
 	fn expired_params_produces_invalid_params() {
 		let min_fee_msat = 100;
 		let proportional = 21;

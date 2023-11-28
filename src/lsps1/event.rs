@@ -1,9 +1,11 @@
 #![allow(missing_docs)]
 
-use bitcoin::secp256k1::PublicKey;
-
 use super::msgs::{ChannelInfo, OptionsSupported, Order, OrderId, Payment};
+
 use crate::lsps0::msgs::RequestId;
+use crate::prelude::String;
+
+use bitcoin::secp256k1::PublicKey;
 
 /// An "Event" which you should probably take some action in response to.
 #[derive(Clone, Debug, PartialEq, Eq)]
