@@ -49,7 +49,7 @@ pub enum LSPS2Event {
 		/// It needs to be passed to [`LiquidityManager::opening_fee_params_selected`].
 		///
 		/// [`LiquidityManager::opening_fee_params_selected`]: crate::LiquidityManager::opening_fee_params_selected
-		lsps2_id: u128,
+		jit_channel_id: u128,
 		/// The node id of the LSP that provided this response.
 		counterparty_node_id: PublicKey,
 		/// The menu of fee parameters the LSP is offering at this time.

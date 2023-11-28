@@ -185,9 +185,9 @@ impl InboundJITChannel {
 	}
 
 	pub fn invoice_params_received(
-		&mut self, client_trusts_lsp: bool, lsps2_scid: JitChannelScid,
+		&mut self, client_trusts_lsp: bool, jit_channel_scid: JitChannelScid,
 	) -> Result<(), LightningError> {
-		self.state = self.state.invoice_params_received(client_trusts_lsp, lsps2_scid)?;
+		self.state = self.state.invoice_params_received(client_trusts_lsp, jit_channel_scid)?;
 		Ok(())
 	}
 }
@@ -370,20 +370,20 @@ struct PeerState {
 }
 
 impl PeerState {
-	pub fn insert_inbound_channel(&mut self, lsps2_id: u128, channel: InboundJITChannel) {
-		self.inbound_channels_by_id.insert(lsps2_id, channel);
+	pub fn insert_inbound_channel(&mut self, jit_channel_id: u128, channel: InboundJITChannel) {
+		self.inbound_channels_by_id.insert(jit_channel_id, channel);
 	}
 
 	pub fn insert_outbound_channel(&mut self, scid: u64, channel: OutboundJITChannel) {
 		self.outbound_channels_by_scid.insert(scid, channel);
 	}
 
-	pub fn insert_request(&mut self, request_id: RequestId, lsps2_id: u128) {
-		self.request_to_cid.insert(request_id, lsps2_id);
+	pub fn insert_request(&mut self, request_id: RequestId, jit_channel_id: u128) {
+		self.request_to_cid.insert(request_id, jit_channel_id);
 	}
 
-	pub fn remove_inbound_channel(&mut self, lsps2_id: u128) {
-		self.inbound_channels_by_id.remove(&lsps2_id);
+	pub fn remove_inbound_channel(&mut self, jit_channel_id: u128) {
+		self.inbound_channels_by_id.remove(&jit_channel_id);
 	}
 
 	pub fn remove_outbound_channel(&mut self, scid: u64) {
@@ -490,18 +490,19 @@ where
 		&self, counterparty_node_id: PublicKey, payment_size_msat: Option<u64>,
 		token: Option<String>, user_channel_id: u128,
 	) {
-		let lsps2_id = self.generate_lsps2_id();
-		let channel = InboundJITChannel::new(lsps2_id, user_channel_id, payment_size_msat, token);
+		let jit_channel_id = self.generate_jit_channel_id();
+		let channel =
+			InboundJITChannel::new(jit_channel_id, user_channel_id, payment_size_msat, token);
 
 		let mut outer_state_lock = self.per_peer_state.write().unwrap();
 		let inner_state_lock = outer_state_lock
 			.entry(counterparty_node_id)
 			.or_insert(Mutex::new(PeerState::default()));
 		let peer_state = inner_state_lock.get_mut().unwrap();
-		peer_state.insert_inbound_channel(lsps2_id, channel);
+		peer_state.insert_inbound_channel(jit_channel_id, channel);
 
 		let request_id = self.generate_request_id();
-		peer_state.insert_request(request_id.clone(), lsps2_id);
+		peer_state.insert_request(request_id.clone(), jit_channel_id);
 
 		{
 			let mut pending_messages = self.pending_messages.lock().unwrap();
@@ -588,25 +589,27 @@ where
 	}
 
 	pub fn opening_fee_params_selected(
-		&self, counterparty_node_id: PublicKey, lsps2_id: u128,
+		&self, counterparty_node_id: PublicKey, jit_channel_id: u128,
 		opening_fee_params: OpeningFeeParams,
 	) -> Result<(), APIError> {
 		let outer_state_lock = self.per_peer_state.read().unwrap();
 		match outer_state_lock.get(&counterparty_node_id) {
 			Some(inner_state_lock) => {
 				let mut peer_state = inner_state_lock.lock().unwrap();
-				if let Some(lsps2) = peer_state.inbound_channels_by_id.get_mut(&lsps2_id) {
-					let version = match lsps2.opening_fee_params_selected() {
+				if let Some(jit_channel) =
+					peer_state.inbound_channels_by_id.get_mut(&jit_channel_id)
+				{
+					let version = match jit_channel.opening_fee_params_selected() {
 						Ok(version) => version,
 						Err(e) => {
-							peer_state.remove_inbound_channel(lsps2_id);
+							peer_state.remove_inbound_channel(jit_channel_id);
 							return Err(APIError::APIMisuseError { err: e.err });
 						}
 					};
 
 					let request_id = self.generate_request_id();
-					let payment_size_msat = lsps2.config.payment_size_msat;
-					peer_state.insert_request(request_id.clone(), lsps2_id);
+					let payment_size_msat = jit_channel.config.payment_size_msat;
+					peer_state.insert_request(request_id.clone(), jit_channel_id);
 
 					{
 						let mut pending_messages = self.pending_messages.lock().unwrap();
@@ -628,7 +631,7 @@ where
 					}
 				} else {
 					return Err(APIError::APIMisuseError {
-						err: format!("Channel with id {} not found", lsps2_id),
+						err: format!("Channel with id {} not found", jit_channel_id),
 					});
 				}
 			}
@@ -659,7 +662,7 @@ where
 							peer_by_scid.insert(scid, counterparty_node_id);
 						}
 
-						let outbound_lsps2 = OutboundJITChannel::new(
+						let outbound_jit_channel = OutboundJITChannel::new(
 							scid,
 							cltv_expiry_delta,
 							client_trusts_lsp,
@@ -667,13 +670,13 @@ where
 							buy_request.opening_fee_params,
 						);
 
-						peer_state.insert_outbound_channel(scid, outbound_lsps2);
+						peer_state.insert_outbound_channel(scid, outbound_jit_channel);
 
 						self.enqueue_response(
 							counterparty_node_id,
 							request_id,
 							LSPS2Response::Buy(BuyResponse {
-								lsps2_scid: scid.into(),
+								jit_channel_scid: scid.into(),
 								lsp_cltv_expiry_delta: cltv_expiry_delta,
 								client_trusts_lsp,
 							}),
@@ -701,9 +704,9 @@ where
 			match outer_state_lock.get(counterparty_node_id) {
 				Some(inner_state_lock) => {
 					let mut peer_state = inner_state_lock.lock().unwrap();
-					if let Some(lsps2) = peer_state.outbound_channels_by_scid.get_mut(&scid) {
+					if let Some(jit_channel) = peer_state.outbound_channels_by_scid.get_mut(&scid) {
 						let htlc = InterceptedHTLC { intercept_id, expected_outbound_amount_msat };
-						match lsps2.htlc_intercepted(htlc) {
+						match jit_channel.htlc_intercepted(htlc) {
 							Ok(Some((opening_fee_msat, amt_to_forward_msat))) => {
 								self.enqueue_event(Event::LSPS2(LSPS2Event::OpenChannel {
 									their_network_key: counterparty_node_id.clone(),
@@ -742,8 +745,8 @@ where
 			match outer_state_lock.get(counterparty_node_id) {
 				Some(inner_state_lock) => {
 					let mut peer_state = inner_state_lock.lock().unwrap();
-					if let Some(lsps2) = peer_state.outbound_channels_by_scid.get_mut(&scid) {
-						match lsps2.channel_ready() {
+					if let Some(jit_channel) = peer_state.outbound_channels_by_scid.get_mut(&scid) {
+						match jit_channel.channel_ready() {
 							Ok((htlcs, total_amt_to_forward_msat)) => {
 								let amounts_to_forward_msat = calculate_amount_to_forward_per_htlc(
 									&htlcs,
@@ -790,7 +793,7 @@ where
 		Ok(())
 	}
 
-	fn generate_lsps2_id(&self) -> u128 {
+	fn generate_jit_channel_id(&self) -> u128 {
 		let bytes = self.entropy_source.get_secure_random_bytes();
 		let mut id_bytes: [u8; 16] = [0; 16];
 		id_bytes.copy_from_slice(&bytes[0..16]);
@@ -841,7 +844,7 @@ where
 			Some(inner_state_lock) => {
 				let mut peer_state = inner_state_lock.lock().unwrap();
 
-				let lsps2_id =
+				let jit_channel_id =
 					peer_state.request_to_cid.remove(&request_id).ok_or(LightningError {
 						err: format!(
 							"Received get_versions response for an unknown request: {:?}",
@@ -850,27 +853,29 @@ where
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					})?;
 
-				let lsps2 =
-					peer_state.inbound_channels_by_id.get_mut(&lsps2_id).ok_or(LightningError {
+				let jit_channel = peer_state
+					.inbound_channels_by_id
+					.get_mut(&jit_channel_id)
+					.ok_or(LightningError {
 						err: format!(
 							"Received get_versions response for an unknown channel: {:?}",
-							lsps2_id
+							jit_channel_id,
 						),
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					})?;
 
-				let token = lsps2.config.token.clone();
+				let token = jit_channel.config.token.clone();
 
-				let version = match lsps2.versions_received(result.versions) {
+				let version = match jit_channel.versions_received(result.versions) {
 					Ok(version) => version,
 					Err(e) => {
-						peer_state.remove_inbound_channel(lsps2_id);
+						peer_state.remove_inbound_channel(jit_channel_id);
 						return Err(e);
 					}
 				};
 
 				let request_id = self.generate_request_id();
-				peer_state.insert_request(request_id.clone(), lsps2_id);
+				peer_state.insert_request(request_id.clone(), jit_channel_id);
 
 				{
 					let mut pending_messages = self.pending_messages.lock().unwrap();
@@ -947,7 +952,7 @@ where
 			Some(inner_state_lock) => {
 				let mut peer_state = inner_state_lock.lock().unwrap();
 
-				let lsps2_id =
+				let jit_channel_id =
 					peer_state.request_to_cid.remove(&request_id).ok_or(LightningError {
 						err: format!(
 							"Received get_info response for an unknown request: {:?}",
@@ -956,17 +961,19 @@ where
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					})?;
 
-				let lsps2 =
-					peer_state.inbound_channels_by_id.get_mut(&lsps2_id).ok_or(LightningError {
+				let jit_channel = peer_state
+					.inbound_channels_by_id
+					.get_mut(&jit_channel_id)
+					.ok_or(LightningError {
 						err: format!(
 							"Received get_info response for an unknown channel: {:?}",
-							lsps2_id
+							jit_channel_id
 						),
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					})?;
 
-				if let Err(e) = lsps2.info_received() {
-					peer_state.remove_inbound_channel(lsps2_id);
+				if let Err(e) = jit_channel.info_received() {
+					peer_state.remove_inbound_channel(jit_channel_id);
 					return Err(e);
 				}
 
@@ -975,8 +982,8 @@ where
 					opening_fee_params_menu: result.opening_fee_params_menu,
 					min_payment_size_msat: result.min_payment_size_msat,
 					max_payment_size_msat: result.max_payment_size_msat,
-					lsps2_id: lsps2.id,
-					user_channel_id: lsps2.config.user_id,
+					jit_channel_id,
+					user_channel_id: jit_channel.config.user_id,
 				}));
 			}
 			None => {
@@ -1001,7 +1008,7 @@ where
 			Some(inner_state_lock) => {
 				let mut peer_state = inner_state_lock.lock().unwrap();
 
-				let lsps2_id =
+				let jit_channel_id =
 					peer_state.request_to_cid.remove(&request_id).ok_or(LightningError {
 						err: format!(
 							"Received get_info error for an unknown request: {:?}",
@@ -1010,10 +1017,15 @@ where
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					})?;
 
-				peer_state.inbound_channels_by_id.remove(&lsps2_id).ok_or(LightningError {
-					err: format!("Received get_info error for an unknown channel: {:?}", lsps2_id),
-					action: ErrorAction::IgnoreAndLog(Level::Info),
-				})?;
+				peer_state.inbound_channels_by_id.remove(&jit_channel_id).ok_or(
+					LightningError {
+						err: format!(
+							"Received get_info error for an unknown channel: {:?}",
+							jit_channel_id
+						),
+						action: ErrorAction::IgnoreAndLog(Level::Info),
+					},
+				)?;
 				Ok(())
 			}
 			None => {
@@ -1161,7 +1173,7 @@ where
 			Some(inner_state_lock) => {
 				let mut peer_state = inner_state_lock.lock().unwrap();
 
-				let lsps2_id =
+				let jit_channel_id =
 					peer_state.request_to_cid.remove(&request_id).ok_or(LightningError {
 						err: format!(
 							"Received buy response for an unknown request: {:?}",
@@ -1170,36 +1182,39 @@ where
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					})?;
 
-				let lsps2 =
-					peer_state.inbound_channels_by_id.get_mut(&lsps2_id).ok_or(LightningError {
+				let jit_channel = peer_state
+					.inbound_channels_by_id
+					.get_mut(&jit_channel_id)
+					.ok_or(LightningError {
 						err: format!(
 							"Received buy response for an unknown channel: {:?}",
-							lsps2_id
+							jit_channel_id
 						),
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					})?;
 
-				if let Err(e) = lsps2
-					.invoice_params_received(result.client_trusts_lsp, result.lsps2_scid.clone())
-				{
-					peer_state.remove_inbound_channel(lsps2_id);
+				if let Err(e) = jit_channel.invoice_params_received(
+					result.client_trusts_lsp,
+					result.jit_channel_scid.clone(),
+				) {
+					peer_state.remove_inbound_channel(jit_channel_id);
 					return Err(e);
 				}
 
-				if let Ok(scid) = result.lsps2_scid.to_scid() {
+				if let Ok(scid) = result.jit_channel_scid.to_scid() {
 					self.enqueue_event(Event::LSPS2(LSPS2Event::InvoiceGenerationReady {
 						counterparty_node_id: *counterparty_node_id,
 						scid,
 						cltv_expiry_delta: result.lsp_cltv_expiry_delta,
-						payment_size_msat: lsps2.config.payment_size_msat,
+						payment_size_msat: jit_channel.config.payment_size_msat,
 						client_trusts_lsp: result.client_trusts_lsp,
-						user_channel_id: lsps2.config.user_id,
+						user_channel_id: jit_channel.config.user_id,
 					}));
 				} else {
 					return Err(LightningError {
 						err: format!(
 							"Received buy response with an invalid scid {:?}",
-							result.lsps2_scid
+							result.jit_channel_scid
 						),
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					});
@@ -1226,15 +1241,20 @@ where
 			Some(inner_state_lock) => {
 				let mut peer_state = inner_state_lock.lock().unwrap();
 
-				let lsps2_id =
+				let jit_channel_id =
 					peer_state.request_to_cid.remove(&request_id).ok_or(LightningError {
 						err: format!("Received buy error for an unknown request: {:?}", request_id),
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					})?;
 
-				let _lsps2 =
-					peer_state.inbound_channels_by_id.remove(&lsps2_id).ok_or(LightningError {
-						err: format!("Received buy error for an unknown channel: {:?}", lsps2_id),
+				let _jit_channel = peer_state
+					.inbound_channels_by_id
+					.remove(&jit_channel_id)
+					.ok_or(LightningError {
+						err: format!(
+							"Received buy error for an unknown channel: {:?}",
+							jit_channel_id
+						),
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					})?;
 				Ok(())
