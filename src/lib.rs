@@ -26,3 +26,4 @@ pub mod lsps2;
 mod utils;
 
 pub use lsps0::message_handler::{JITChannelsConfig, LiquidityManager, LiquidityProviderConfig};
+pub use lsps0::msgs::LSPS_MESSAGE_TYPE_ID;
