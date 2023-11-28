@@ -447,14 +447,12 @@ where {
 	/// [`Event::HTLCIntercepted`]: lightning::events::Event::HTLCIntercepted
 	/// [`LSPS2Event::OpenChannel`]: crate::jit_channel::LSPS2Event::OpenChannel
 	pub fn htlc_intercepted(
-		&self, scid: u64, intercept_id: InterceptId, inbound_amount_msat: u64,
-		expected_outbound_amount_msat: u64,
+		&self, scid: u64, intercept_id: InterceptId, expected_outbound_amount_msat: u64,
 	) -> Result<(), APIError> {
 		if let Some(lsps2_message_handler) = &self.lsps2_message_handler {
 			lsps2_message_handler.htlc_intercepted(
 				scid,
 				intercept_id,
-				inbound_amount_msat,
 				expected_outbound_amount_msat,
 			)?;
 		}

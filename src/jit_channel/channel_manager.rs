@@ -45,6 +45,12 @@ use crate::jit_channel::msgs::{
 
 const SUPPORTED_SPEC_VERSIONS: [u16; 1] = [1];
 
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+struct InterceptedHTLC {
+	intercept_id: InterceptId,
+	expected_outbound_amount_msat: u64,
+}
+
 struct ChannelStateError(String);
 
 impl From<ChannelStateError> for LightningError {
@@ -186,50 +192,86 @@ impl InboundJITChannel {
 
 #[derive(PartialEq, Debug)]
 enum OutboundJITChannelState {
-	InvoiceParametersGenerated {
-		short_channel_id: u64,
-		cltv_expiry_delta: u32,
+	AwaitingPayment {
+		min_fee_msat: u64,
+		proportional_fee: u32,
+		htlcs: Vec<InterceptedHTLC>,
 		payment_size_msat: Option<u64>,
-		opening_fee_params: OpeningFeeParams,
 	},
 	PendingChannelOpen {
-		intercept_id: InterceptId,
+		htlcs: Vec<InterceptedHTLC>,
 		opening_fee_msat: u64,
 		amt_to_forward_msat: u64,
 	},
 	ChannelReady {
-		intercept_id: InterceptId,
+		htlcs: Vec<InterceptedHTLC>,
 		amt_to_forward_msat: u64,
 	},
 }
 
 impl OutboundJITChannelState {
-	pub fn new(
-		short_channel_id: u64, cltv_expiry_delta: u32, payment_size_msat: Option<u64>,
-		opening_fee_params: OpeningFeeParams,
-	) -> Self {
-		OutboundJITChannelState::InvoiceParametersGenerated {
-			short_channel_id,
-			cltv_expiry_delta,
+	pub fn new(payment_size_msat: Option<u64>, opening_fee_params: OpeningFeeParams) -> Self {
+		OutboundJITChannelState::AwaitingPayment {
+			min_fee_msat: opening_fee_params.min_fee_msat,
+			proportional_fee: opening_fee_params.proportional,
+			htlcs: vec![],
 			payment_size_msat,
-			opening_fee_params,
 		}
 	}
 
-	pub fn htlc_intercepted(
-		&self, expected_outbound_amount_msat: u64, intercept_id: InterceptId,
-	) -> Result<Self, ChannelStateError> {
+	pub fn htlc_intercepted(&self, htlc: InterceptedHTLC) -> Result<Self, ChannelStateError> {
 		match self {
-			OutboundJITChannelState::InvoiceParametersGenerated { opening_fee_params, .. } => {
-				compute_opening_fee(
-					expected_outbound_amount_msat,
-					opening_fee_params.min_fee_msat,
-					opening_fee_params.proportional.into(),
-				).map(|opening_fee_msat| OutboundJITChannelState::PendingChannelOpen {
-					intercept_id,
-					opening_fee_msat,
-					amt_to_forward_msat: expected_outbound_amount_msat - opening_fee_msat,
-				}).ok_or(ChannelStateError(format!("Could not compute valid opening fee with min_fee_msat = {}, proportional = {}, and expected_outbound_amount_msat = {}", opening_fee_params.min_fee_msat, opening_fee_params.proportional, expected_outbound_amount_msat)))
+			OutboundJITChannelState::AwaitingPayment {
+				htlcs,
+				payment_size_msat,
+				min_fee_msat,
+				proportional_fee,
+			} => {
+				let mut htlcs = htlcs.clone();
+				htlcs.push(htlc);
+
+				let total_expected_outbound_amount_msat =
+					htlcs.iter().map(|htlc| htlc.expected_outbound_amount_msat).sum();
+
+				let expected_payment_size_msat =
+					payment_size_msat.unwrap_or(total_expected_outbound_amount_msat);
+
+				let opening_fee_msat = compute_opening_fee(
+					expected_payment_size_msat,
+					*min_fee_msat,
+					(*proportional_fee).into(),
+				).ok_or(ChannelStateError(
+					format!("Could not compute valid opening fee with min_fee_msat = {}, proportional = {}, and total_expected_outbound_amount_msat = {}", 
+						min_fee_msat,
+						proportional_fee,
+						total_expected_outbound_amount_msat
+					)
+				))?;
+
+				let amt_to_forward_msat =
+					expected_payment_size_msat.saturating_sub(opening_fee_msat);
+
+				if total_expected_outbound_amount_msat >= expected_payment_size_msat
+					&& amt_to_forward_msat > 0
+				{
+					Ok(OutboundJITChannelState::PendingChannelOpen {
+						htlcs,
+						opening_fee_msat,
+						amt_to_forward_msat,
+					})
+				} else {
+					// payment size being specified means MPP is supported
+					if payment_size_msat.is_some() {
+						Ok(OutboundJITChannelState::AwaitingPayment {
+							min_fee_msat: *min_fee_msat,
+							proportional_fee: *proportional_fee,
+							htlcs,
+							payment_size_msat: *payment_size_msat,
+						})
+					} else {
+						Err(ChannelStateError("HTLC is too small to pay opening fee".to_string()))
+					}
+				}
 			}
 			state => Err(ChannelStateError(format!(
 				"Invoice params received when JIT Channel was in state: {:?}",
@@ -240,14 +282,12 @@ impl OutboundJITChannelState {
 
 	pub fn channel_ready(&self) -> Result<Self, ChannelStateError> {
 		match self {
-			OutboundJITChannelState::PendingChannelOpen {
-				intercept_id,
-				amt_to_forward_msat,
-				..
-			} => Ok(OutboundJITChannelState::ChannelReady {
-				intercept_id: *intercept_id,
-				amt_to_forward_msat: *amt_to_forward_msat,
-			}),
+			OutboundJITChannelState::PendingChannelOpen { htlcs, amt_to_forward_msat, .. } => {
+				Ok(OutboundJITChannelState::ChannelReady {
+					htlcs: htlcs.clone(),
+					amt_to_forward_msat: *amt_to_forward_msat,
+				})
+			}
 			state => Err(ChannelStateError(format!(
 				"Channel ready received when JIT Channel was in state: {:?}",
 				state
@@ -258,34 +298,39 @@ impl OutboundJITChannelState {
 
 struct OutboundJITChannel {
 	state: OutboundJITChannelState,
+	scid: u64,
+	cltv_expiry_delta: u32,
+	client_trusts_lsp: bool,
 }
 
 impl OutboundJITChannel {
 	pub fn new(
-		scid: u64, cltv_expiry_delta: u32, payment_size_msat: Option<u64>,
+		scid: u64, cltv_expiry_delta: u32, client_trusts_lsp: bool, payment_size_msat: Option<u64>,
 		opening_fee_params: OpeningFeeParams,
 	) -> Self {
 		Self {
-			state: OutboundJITChannelState::new(
-				scid,
-				cltv_expiry_delta,
-				payment_size_msat,
-				opening_fee_params,
-			),
+			scid,
+			cltv_expiry_delta,
+			client_trusts_lsp,
+			state: OutboundJITChannelState::new(payment_size_msat, opening_fee_params),
 		}
 	}
 
 	pub fn htlc_intercepted(
-		&mut self, expected_outbound_amount_msat: u64, intercept_id: InterceptId,
-	) -> Result<(u64, u64), LightningError> {
-		self.state = self.state.htlc_intercepted(expected_outbound_amount_msat, intercept_id)?;
+		&mut self, htlc: InterceptedHTLC,
+	) -> Result<Option<(u64, u64)>, LightningError> {
+		self.state = self.state.htlc_intercepted(htlc)?;
 
 		match &self.state {
+			OutboundJITChannelState::AwaitingPayment { htlcs, payment_size_msat, .. } => {
+				// TODO: log that we received an htlc but are still awaiting payment
+				Ok(None)
+			}
 			OutboundJITChannelState::PendingChannelOpen {
 				opening_fee_msat,
 				amt_to_forward_msat,
 				..
-			} => Ok((*opening_fee_msat, *amt_to_forward_msat)),
+			} => Ok(Some((*opening_fee_msat, *amt_to_forward_msat))),
 			impossible_state => Err(LightningError {
 				err: format!(
 					"Impossible state transition during htlc_intercepted to {:?}",
@@ -296,12 +341,12 @@ impl OutboundJITChannel {
 		}
 	}
 
-	pub fn channel_ready(&mut self) -> Result<(InterceptId, u64), LightningError> {
+	pub fn channel_ready(&mut self) -> Result<(Vec<InterceptedHTLC>, u64), LightningError> {
 		self.state = self.state.channel_ready()?;
 
 		match &self.state {
-			OutboundJITChannelState::ChannelReady { intercept_id, amt_to_forward_msat } => {
-				Ok((*intercept_id, *amt_to_forward_msat))
+			OutboundJITChannelState::ChannelReady { htlcs, amt_to_forward_msat } => {
+				Ok((htlcs.clone(), *amt_to_forward_msat))
 			}
 			impossible_state => Err(LightningError {
 				err: format!(
@@ -585,6 +630,7 @@ where
 						let outbound_jit_channel = OutboundJITChannel::new(
 							scid,
 							cltv_expiry_delta,
+							client_trusts_lsp,
 							buy_request.payment_size_msat,
 							buy_request.opening_fee_params,
 						);
@@ -615,8 +661,7 @@ where
 	}
 
 	pub(crate) fn htlc_intercepted(
-		&self, scid: u64, intercept_id: InterceptId, inbound_amount_msat: u64,
-		expected_outbound_amount_msat: u64,
+		&self, scid: u64, intercept_id: InterceptId, expected_outbound_amount_msat: u64,
 	) -> Result<(), APIError> {
 		let peer_by_scid = self.peer_by_scid.read().unwrap();
 		if let Some(counterparty_node_id) = peer_by_scid.get(&scid) {
@@ -625,25 +670,17 @@ where
 				Some(inner_state_lock) => {
 					let mut peer_state = inner_state_lock.lock().unwrap();
 					if let Some(jit_channel) = peer_state.outbound_channels_by_scid.get_mut(&scid) {
-						// TODO: Need to support MPP payments. If payment_amount_msat is known, needs to queue intercepted HTLCs in a map by payment_hash
-						//       LiquidityManager will need to be regularly polled so it can continually check if the payment amount has been received
-						//       and can release the payment or if the channel valid_until has expired and should be failed.
-						//       Can perform check each time HTLC is received and on interval? I guess interval only needs to check expiration as
-						//       we can only reach threshold when htlc is intercepted.
-
-						match jit_channel
-							.htlc_intercepted(expected_outbound_amount_msat, intercept_id)
-						{
-							Ok((opening_fee_msat, amt_to_forward_msat)) => {
+						let htlc = InterceptedHTLC { intercept_id, expected_outbound_amount_msat };
+						match jit_channel.htlc_intercepted(htlc) {
+							Ok(Some((opening_fee_msat, amt_to_forward_msat))) => {
 								self.enqueue_event(Event::LSPS2(LSPS2Event::OpenChannel {
 									their_network_key: counterparty_node_id.clone(),
-									inbound_amount_msat,
-									expected_outbound_amount_msat,
 									amt_to_forward_msat,
 									opening_fee_msat,
 									user_channel_id: scid as u128,
 								}));
 							}
+							Ok(None) => {}
 							Err(e) => {
 								self.channel_manager.fail_intercepted_htlc(intercept_id)?;
 								peer_state.outbound_channels_by_scid.remove(&scid);
@@ -675,13 +712,22 @@ where
 					let mut peer_state = inner_state_lock.lock().unwrap();
 					if let Some(jit_channel) = peer_state.outbound_channels_by_scid.get_mut(&scid) {
 						match jit_channel.channel_ready() {
-							Ok((intercept_id, amt_to_forward_msat)) => {
-								self.channel_manager.forward_intercepted_htlc(
-									intercept_id,
-									channel_id,
-									*counterparty_node_id,
-									amt_to_forward_msat,
-								)?;
+							Ok((htlcs, total_amt_to_forward_msat)) => {
+								let amounts_to_forward_msat = calculate_amount_to_forward_per_htlc(
+									&htlcs,
+									total_amt_to_forward_msat,
+								);
+
+								for (intercept_id, amount_to_forward_msat) in
+									amounts_to_forward_msat
+								{
+									self.channel_manager.forward_intercepted_htlc(
+										intercept_id,
+										channel_id,
+										*counterparty_node_id,
+										amount_to_forward_msat,
+									)?;
+								}
 							}
 							Err(e) => {
 								return Err(APIError::APIMisuseError {
@@ -1235,5 +1281,73 @@ where
 				}
 			},
 		}
+	}
+}
+
+fn calculate_amount_to_forward_per_htlc(
+	htlcs: &[InterceptedHTLC], total_amt_to_forward_msat: u64,
+) -> Vec<(InterceptId, u64)> {
+	let total_received_msat: u64 =
+		htlcs.iter().map(|htlc| htlc.expected_outbound_amount_msat).sum();
+
+	let mut fee_remaining_msat = total_received_msat - total_amt_to_forward_msat;
+	let total_fee_msat = fee_remaining_msat;
+
+	let mut per_htlc_forwards = vec![];
+
+	for (index, htlc) in htlcs.iter().enumerate() {
+		let proportional_fee_amt_msat =
+			total_fee_msat * htlc.expected_outbound_amount_msat / total_received_msat;
+
+		let mut actual_fee_amt_msat = std::cmp::min(fee_remaining_msat, proportional_fee_amt_msat);
+		fee_remaining_msat -= actual_fee_amt_msat;
+
+		if index == htlcs.len() - 1 {
+			actual_fee_amt_msat += fee_remaining_msat;
+		}
+
+		let amount_to_forward_msat = htlc.expected_outbound_amount_msat - actual_fee_amt_msat;
+
+		per_htlc_forwards.push((htlc.intercept_id, amount_to_forward_msat))
+	}
+
+	per_htlc_forwards
+}
+
+#[cfg(test)]
+mod tests {
+
+	use super::*;
+
+	#[test]
+	fn test_calculate_amount_to_forward() {
+		// TODO: Use proptest to generate random allocations
+		let htlcs = vec![
+			InterceptedHTLC {
+				intercept_id: InterceptId([0; 32]),
+				expected_outbound_amount_msat: 1000,
+			},
+			InterceptedHTLC {
+				intercept_id: InterceptId([1; 32]),
+				expected_outbound_amount_msat: 2000,
+			},
+			InterceptedHTLC {
+				intercept_id: InterceptId([2; 32]),
+				expected_outbound_amount_msat: 3000,
+			},
+		];
+
+		let total_amt_to_forward_msat = 5000;
+
+		let result = calculate_amount_to_forward_per_htlc(&htlcs, total_amt_to_forward_msat);
+
+		assert_eq!(result[0].0, htlcs[0].intercept_id);
+		assert_eq!(result[0].1, 834);
+
+		assert_eq!(result[1].0, htlcs[1].intercept_id);
+		assert_eq!(result[1].1, 1667);
+
+		assert_eq!(result[2].0, htlcs[2].intercept_id);
+		assert_eq!(result[2].1, 2499);
 	}
 }
