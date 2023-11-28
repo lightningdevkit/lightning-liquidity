@@ -14,10 +14,10 @@
 //! [`LiquidityManager::get_and_clear_pending_events`] to receive events.
 //!
 //! [`LiquidityManager::get_and_clear_pending_events`]: crate::LiquidityManager::get_and_clear_pending_events
+use crate::jit_channel;
 /// [`crate::LiquidityManager::get_and_clear_pending_events()`] to receive events.
 #[cfg(lsps1)]
-use crate::channel_request;
-use crate::jit_channel;
+use crate::lsps1;
 use std::collections::VecDeque;
 use std::sync::{Condvar, Mutex};
 
@@ -65,5 +65,5 @@ pub enum Event {
 	LSPS2(jit_channel::LSPS2Event),
 	/// An LSPS1 protocol event.
 	#[cfg(lsps1)]
-	LSPS1(channel_request::event::Event),
+	LSPS1(lsps1::event::Event),
 }

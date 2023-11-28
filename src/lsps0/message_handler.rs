@@ -2,10 +2,8 @@
 
 #[cfg(lsps1)]
 use {
-	crate::channel_request::channel_manager::CRManager,
-	crate::channel_request::msgs::{
-		ChannelInfo, OptionsSupported, Order, OrderId, OrderState, Payment,
-	},
+	crate::lsps1::channel_manager::CRManager,
+	crate::lsps1::msgs::{ChannelInfo, OptionsSupported, Order, OrderId, OrderState, Payment},
 };
 
 use crate::events::{Event, EventQueue};
