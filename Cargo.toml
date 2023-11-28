@@ -1,5 +1,5 @@
 [package]
-name = "ldk-lsp-client"
+name = "lightning-liquidity"
 version = "0.1.0"
 authors = ["John Cantrell <johncantrell97@gmail.com>", "Elias Rohrer <dev@tnull.de>"]
 edition = "2018"
