@@ -13,26 +13,24 @@ use crate::lsps0::protocol::LSPS0MessageHandler;
 use crate::lsps2::channel_manager::JITChannelManager;
 use crate::lsps2::msgs::{OpeningFeeParams, RawOpeningFeeParams};
 
-use chrono::Utc;
-use lightning::chain::chaininterface::{BroadcasterInterface, FeeEstimator};
 use lightning::chain::{self, BestBlock, Confirm, Filter, Listen};
-use lightning::ln::channelmanager::{ChainParameters, ChannelManager, InterceptId};
+use lightning::ln::channelmanager::{AChannelManager, ChainParameters, InterceptId};
 use lightning::ln::features::{InitFeatures, NodeFeatures};
-use lightning::ln::msgs::{
-	ChannelMessageHandler, ErrorAction, LightningError, OnionMessageHandler, RoutingMessageHandler,
-};
-use lightning::ln::peer_handler::{CustomMessageHandler, PeerManager, SocketDescriptor};
+use lightning::ln::msgs::{ErrorAction, LightningError};
+use lightning::ln::peer_handler::{APeerManager, CustomMessageHandler};
 use lightning::ln::wire::CustomMessageReader;
 use lightning::ln::ChannelId;
-use lightning::routing::router::Router;
-use lightning::sign::{EntropySource, NodeSigner, SignerProvider};
+use lightning::sign::EntropySource;
 use lightning::util::errors::APIError;
-use lightning::util::logger::{Level, Logger};
+use lightning::util::logger::Level;
 use lightning::util::ser::Readable;
 
 use bitcoin::blockdata::constants::genesis_block;
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::BlockHash;
+
+#[cfg(lsps1)]
+use chrono::Utc;
 
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -108,32 +106,13 @@ pub struct CRChannelConfig {
 /// [`Event::ChannelReady`]: lightning::events::Event::ChannelReady
 pub struct LiquidityManager<
 	ES: Deref + Clone,
-	M: Deref,
-	T: Deref,
-	F: Deref,
-	R: Deref,
-	SP: Deref,
-	L: Deref,
-	Descriptor: SocketDescriptor,
-	RM: Deref,
-	CM: Deref,
-	OM: Deref,
-	CMH: Deref,
-	NS: Deref,
-	C: Deref,
+	CM: Deref + Clone,
+	PM: Deref + Clone,
+	C: Deref + Clone,
 > where
 	ES::Target: EntropySource,
-	M::Target: chain::Watch<<SP::Target as SignerProvider>::Signer>,
-	T::Target: BroadcasterInterface,
-	F::Target: FeeEstimator,
-	R::Target: Router,
-	SP::Target: SignerProvider,
-	L::Target: Logger,
-	RM::Target: RoutingMessageHandler,
-	CM::Target: ChannelMessageHandler,
-	OM::Target: OnionMessageHandler,
-	CMH::Target: CustomMessageHandler,
-	NS::Target: NodeSigner,
+	CM::Target: AChannelManager,
+	PM::Target: APeerManager,
 	C::Target: Filter,
 {
 	pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
@@ -141,55 +120,29 @@ pub struct LiquidityManager<
 	request_id_to_method_map: Mutex<HashMap<String, String>>,
 	lsps0_message_handler: LSPS0MessageHandler<ES>,
 	#[cfg(lsps1)]
-	lsps1_message_handler:
-		Option<CRManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, CMH, NS>>,
-	lsps2_message_handler:
-		Option<JITChannelManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, CMH, NS>>,
+	lsps1_message_handler: Option<CRManager<ES, CM, PM, C>>,
+	lsps2_message_handler: Option<JITChannelManager<ES, CM, PM>>,
 	provider_config: Option<LiquidityProviderConfig>,
-	channel_manager: Arc<ChannelManager<M, T, ES, NS, SP, F, R, L>>,
+	channel_manager: CM,
 	chain_source: Option<C>,
 	genesis_hash: Option<BlockHash>,
 	best_block: Option<RwLock<BestBlock>>,
 }
 
-impl<
-		ES: Deref + Clone,
-		M: Deref,
-		T: Deref,
-		F: Deref,
-		R: Deref,
-		SP: Deref,
-		L: Deref,
-		Descriptor: SocketDescriptor,
-		RM: Deref,
-		CM: Deref,
-		OM: Deref,
-		CMH: Deref,
-		NS: Deref,
-		C: Deref,
-	> LiquidityManager<ES, M, T, F, R, SP, L, Descriptor, RM, CM, OM, CMH, NS, C>
+impl<ES: Deref + Clone, CM: Deref + Clone, PM: Deref + Clone, C: Deref + Clone>
+	LiquidityManager<ES, CM, PM, C>
 where
 	ES::Target: EntropySource,
-	M::Target: chain::Watch<<SP::Target as SignerProvider>::Signer>,
-	T::Target: BroadcasterInterface,
-	F::Target: FeeEstimator,
-	R::Target: Router,
-	SP::Target: SignerProvider,
-	L::Target: Logger,
-	RM::Target: RoutingMessageHandler,
-	CM::Target: ChannelMessageHandler,
-	OM::Target: OnionMessageHandler,
-	CMH::Target: CustomMessageHandler,
-	NS::Target: NodeSigner,
+	CM::Target: AChannelManager,
+	PM::Target: APeerManager,
 	C::Target: Filter,
 {
 	/// Constructor for the [`LiquidityManager`].
 	///
 	/// Sets up the required protocol message handlers based on the given [`LiquidityProviderConfig`].
 	pub fn new(
-		entropy_source: ES, provider_config: Option<LiquidityProviderConfig>,
-		channel_manager: Arc<ChannelManager<M, T, ES, NS, SP, F, R, L>>, chain_source: Option<C>,
-		chain_params: Option<ChainParameters>,
+		entropy_source: ES, provider_config: Option<LiquidityProviderConfig>, channel_manager: CM,
+		chain_source: Option<C>, chain_params: Option<ChainParameters>,
 	) -> Self
 where {
 		let pending_messages = Arc::new(Mutex::new(vec![]));
@@ -208,7 +161,7 @@ where {
 					config,
 					Arc::clone(&pending_messages),
 					Arc::clone(&pending_events),
-					Arc::clone(&channel_manager),
+					channel_manager.clone(),
 				)
 			})
 		});
@@ -221,7 +174,8 @@ where {
 					lsps1_config,
 					Arc::clone(&pending_messages),
 					Arc::clone(&pending_events),
-					Arc::clone(&channel_manager),
+					channel_manager.clone(),
+					chain_source.clone(),
 				)
 			})
 		});
@@ -266,9 +220,8 @@ where {
 	/// your background processor uses.
 	///
 	/// [`PeerManager`]: lightning::ln::peer_handler::PeerManager
-	pub fn set_peer_manager(
-		&self, peer_manager: Arc<PeerManager<Descriptor, CM, RM, OM, L, CMH, NS>>,
-	) {
+	/// [`PeerManager::process_events`]: lightning::ln::peer_handler::PeerManager::process_events
+	pub fn set_peer_manager(&self, peer_manager: PM) {
 		#[cfg(lsps1)]
 		if let Some(lsps1_message_handler) = &self.lsps1_message_handler {
 			lsps1_message_handler.set_peer_manager(peer_manager.clone());
@@ -549,36 +502,12 @@ where {
 	}
 }
 
-impl<
-		ES: Deref + Clone + Clone,
-		M: Deref,
-		T: Deref,
-		F: Deref,
-		R: Deref,
-		SP: Deref,
-		L: Deref,
-		Descriptor: SocketDescriptor,
-		RM: Deref,
-		CM: Deref,
-		OM: Deref,
-		CMH: Deref,
-		NS: Deref,
-		C: Deref,
-	> CustomMessageReader
-	for LiquidityManager<ES, M, T, F, R, SP, L, Descriptor, RM, CM, OM, CMH, NS, C>
+impl<ES: Deref + Clone + Clone, CM: Deref + Clone, PM: Deref + Clone, C: Deref + Clone>
+	CustomMessageReader for LiquidityManager<ES, CM, PM, C>
 where
 	ES::Target: EntropySource,
-	M::Target: chain::Watch<<SP::Target as SignerProvider>::Signer>,
-	T::Target: BroadcasterInterface,
-	F::Target: FeeEstimator,
-	R::Target: Router,
-	SP::Target: SignerProvider,
-	L::Target: Logger,
-	RM::Target: RoutingMessageHandler,
-	CM::Target: ChannelMessageHandler,
-	OM::Target: OnionMessageHandler,
-	CMH::Target: CustomMessageHandler,
-	NS::Target: NodeSigner,
+	CM::Target: AChannelManager,
+	PM::Target: APeerManager,
 	C::Target: Filter,
 {
 	type CustomMessage = RawLSPSMessage;
@@ -593,36 +522,12 @@ where
 	}
 }
 
-impl<
-		ES: Deref + Clone,
-		M: Deref,
-		T: Deref,
-		F: Deref,
-		R: Deref,
-		SP: Deref,
-		L: Deref,
-		Descriptor: SocketDescriptor,
-		RM: Deref,
-		CM: Deref,
-		OM: Deref,
-		CMH: Deref,
-		NS: Deref,
-		C: Deref,
-	> CustomMessageHandler
-	for LiquidityManager<ES, M, T, F, R, SP, L, Descriptor, RM, CM, OM, CMH, NS, C>
+impl<ES: Deref + Clone, CM: Deref + Clone, PM: Deref + Clone, C: Deref + Clone> CustomMessageHandler
+	for LiquidityManager<ES, CM, PM, C>
 where
 	ES::Target: EntropySource,
-	M::Target: chain::Watch<<SP::Target as SignerProvider>::Signer>,
-	T::Target: BroadcasterInterface,
-	F::Target: FeeEstimator,
-	R::Target: Router,
-	SP::Target: SignerProvider,
-	L::Target: Logger,
-	RM::Target: RoutingMessageHandler,
-	CM::Target: ChannelMessageHandler,
-	OM::Target: OnionMessageHandler,
-	CMH::Target: CustomMessageHandler,
-	NS::Target: NodeSigner,
+	CM::Target: AChannelManager,
+	PM::Target: APeerManager,
 	C::Target: Filter,
 {
 	fn handle_custom_message(
@@ -681,35 +586,12 @@ where
 	}
 }
 
-impl<
-		ES: Deref + Clone,
-		M: Deref,
-		T: Deref,
-		F: Deref,
-		R: Deref,
-		SP: Deref,
-		L: Deref,
-		Descriptor: SocketDescriptor,
-		RM: Deref,
-		CM: Deref,
-		OM: Deref,
-		CMH: Deref,
-		NS: Deref,
-		C: Deref,
-	> Listen for LiquidityManager<ES, M, T, F, R, SP, L, Descriptor, RM, CM, OM, CMH, NS, C>
+impl<ES: Deref + Clone, CM: Deref + Clone, PM: Deref + Clone, C: Deref + Clone> Listen
+	for LiquidityManager<ES, CM, PM, C>
 where
 	ES::Target: EntropySource,
-	M::Target: chain::Watch<<SP::Target as SignerProvider>::Signer>,
-	T::Target: BroadcasterInterface,
-	F::Target: FeeEstimator,
-	R::Target: Router,
-	SP::Target: SignerProvider,
-	L::Target: Logger,
-	RM::Target: RoutingMessageHandler,
-	CM::Target: ChannelMessageHandler,
-	OM::Target: OnionMessageHandler,
-	CMH::Target: CustomMessageHandler,
-	NS::Target: NodeSigner,
+	CM::Target: AChannelManager,
+	PM::Target: APeerManager,
 	C::Target: Filter,
 {
 	fn filtered_block_connected(
@@ -745,35 +627,12 @@ where
 	}
 }
 
-impl<
-		ES: Deref + Clone,
-		M: Deref,
-		T: Deref,
-		F: Deref,
-		R: Deref,
-		SP: Deref,
-		L: Deref,
-		Descriptor: SocketDescriptor,
-		RM: Deref,
-		CM: Deref,
-		OM: Deref,
-		CMH: Deref,
-		NS: Deref,
-		C: Deref,
-	> Confirm for LiquidityManager<ES, M, T, F, R, SP, L, Descriptor, RM, CM, OM, CMH, NS, C>
+impl<ES: Deref + Clone, CM: Deref + Clone, PM: Deref + Clone, C: Deref + Clone> Confirm
+	for LiquidityManager<ES, CM, PM, C>
 where
 	ES::Target: EntropySource,
-	M::Target: chain::Watch<<SP::Target as SignerProvider>::Signer>,
-	T::Target: BroadcasterInterface,
-	F::Target: FeeEstimator,
-	R::Target: Router,
-	SP::Target: SignerProvider,
-	L::Target: Logger,
-	RM::Target: RoutingMessageHandler,
-	CM::Target: ChannelMessageHandler,
-	OM::Target: OnionMessageHandler,
-	CMH::Target: CustomMessageHandler,
-	NS::Target: NodeSigner,
+	CM::Target: AChannelManager,
+	PM::Target: APeerManager,
 	C::Target: Filter,
 {
 	fn transactions_confirmed(

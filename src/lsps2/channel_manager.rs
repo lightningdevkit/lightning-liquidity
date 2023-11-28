@@ -13,18 +13,13 @@ use std::ops::Deref;
 use std::sync::{Arc, Mutex, RwLock};
 
 use bitcoin::secp256k1::PublicKey;
-use lightning::chain;
-use lightning::chain::chaininterface::{BroadcasterInterface, FeeEstimator};
-use lightning::ln::channelmanager::{ChannelManager, InterceptId};
-use lightning::ln::msgs::{
-	ChannelMessageHandler, ErrorAction, LightningError, OnionMessageHandler, RoutingMessageHandler,
-};
-use lightning::ln::peer_handler::{CustomMessageHandler, PeerManager, SocketDescriptor};
+use lightning::ln::channelmanager::{AChannelManager, InterceptId};
+use lightning::ln::msgs::{ErrorAction, LightningError};
+use lightning::ln::peer_handler::APeerManager;
 use lightning::ln::ChannelId;
-use lightning::routing::router::Router;
-use lightning::sign::{EntropySource, NodeSigner, SignerProvider};
+use lightning::sign::EntropySource;
 use lightning::util::errors::APIError;
-use lightning::util::logger::{Level, Logger};
+use lightning::util::logger::Level;
 
 use crate::events::EventQueue;
 use crate::lsps0::message_handler::ProtocolMessageHandler;
@@ -391,37 +386,15 @@ impl PeerState {
 	}
 }
 
-pub struct JITChannelManager<
-	ES: Deref,
-	M: Deref,
-	T: Deref,
-	F: Deref,
-	R: Deref,
-	SP: Deref,
-	Descriptor: SocketDescriptor,
-	L: Deref,
-	RM: Deref,
-	CM: Deref,
-	OM: Deref,
-	CMH: Deref,
-	NS: Deref,
-> where
+pub struct JITChannelManager<ES: Deref, CM: Deref + Clone, PM: Deref>
+where
 	ES::Target: EntropySource,
-	M::Target: chain::Watch<<SP::Target as SignerProvider>::Signer>,
-	T::Target: BroadcasterInterface,
-	F::Target: FeeEstimator,
-	R::Target: Router,
-	SP::Target: SignerProvider,
-	L::Target: Logger,
-	RM::Target: RoutingMessageHandler,
-	CM::Target: ChannelMessageHandler,
-	OM::Target: OnionMessageHandler,
-	CMH::Target: CustomMessageHandler,
-	NS::Target: NodeSigner,
+	CM::Target: AChannelManager,
+	PM::Target: APeerManager,
 {
 	entropy_source: ES,
-	peer_manager: Mutex<Option<Arc<PeerManager<Descriptor, CM, RM, OM, L, CMH, NS>>>>,
-	channel_manager: Arc<ChannelManager<M, T, ES, NS, SP, F, R, L>>,
+	peer_manager: Mutex<Option<PM>>,
+	channel_manager: CM,
 	pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
 	pending_events: Arc<EventQueue>,
 	per_peer_state: RwLock<HashMap<PublicKey, Mutex<PeerState>>>,
@@ -431,40 +404,16 @@ pub struct JITChannelManager<
 	max_payment_size_msat: u64,
 }
 
-impl<
-		ES: Deref,
-		M: Deref,
-		T: Deref,
-		F: Deref,
-		R: Deref,
-		SP: Deref,
-		Descriptor: SocketDescriptor,
-		L: Deref,
-		RM: Deref,
-		CM: Deref,
-		OM: Deref,
-		CMH: Deref,
-		NS: Deref,
-	> JITChannelManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, CMH, NS>
+impl<ES: Deref, CM: Deref + Clone, PM: Deref> JITChannelManager<ES, CM, PM>
 where
 	ES::Target: EntropySource,
-	M::Target: chain::Watch<<SP::Target as SignerProvider>::Signer>,
-	T::Target: BroadcasterInterface,
-	F::Target: FeeEstimator,
-	R::Target: Router,
-	SP::Target: SignerProvider,
-	L::Target: Logger,
-	RM::Target: RoutingMessageHandler,
-	CM::Target: ChannelMessageHandler,
-	OM::Target: OnionMessageHandler,
-	CMH::Target: CustomMessageHandler,
-	NS::Target: NodeSigner,
+	CM::Target: AChannelManager,
+	PM::Target: APeerManager,
 {
 	pub(crate) fn new(
 		entropy_source: ES, config: &JITChannelsConfig,
 		pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
-		pending_events: Arc<EventQueue>,
-		channel_manager: Arc<ChannelManager<M, T, ES, NS, SP, F, R, L>>,
+		pending_events: Arc<EventQueue>, channel_manager: CM,
 	) -> Self {
 		Self {
 			entropy_source,
@@ -480,9 +429,7 @@ where
 		}
 	}
 
-	pub fn set_peer_manager(
-		&self, peer_manager: Arc<PeerManager<Descriptor, CM, RM, OM, L, CMH, NS>>,
-	) {
+	pub fn set_peer_manager(&self, peer_manager: PM) {
 		*self.peer_manager.lock().unwrap() = Some(peer_manager);
 	}
 
@@ -514,7 +461,7 @@ where
 		}
 
 		if let Some(peer_manager) = self.peer_manager.lock().unwrap().as_ref() {
-			peer_manager.process_events();
+			peer_manager.as_ref().process_events();
 		}
 	}
 
@@ -627,7 +574,7 @@ where
 						));
 					}
 					if let Some(peer_manager) = self.peer_manager.lock().unwrap().as_ref() {
-						peer_manager.process_events();
+						peer_manager.as_ref().process_events();
 					}
 				} else {
 					return Err(APIError::APIMisuseError {
@@ -717,7 +664,9 @@ where
 							}
 							Ok(None) => {}
 							Err(e) => {
-								self.channel_manager.fail_intercepted_htlc(intercept_id)?;
+								self.channel_manager
+									.get_cm()
+									.fail_intercepted_htlc(intercept_id)?;
 								peer_state.outbound_channels_by_scid.remove(&scid);
 								// TODO: cleanup peer_by_scid
 								return Err(APIError::APIMisuseError { err: e.err });
@@ -756,7 +705,7 @@ where
 								for (intercept_id, amount_to_forward_msat) in
 									amounts_to_forward_msat
 								{
-									self.channel_manager.forward_intercepted_htlc(
+									self.channel_manager.get_cm().forward_intercepted_htlc(
 										intercept_id,
 										channel_id,
 										*counterparty_node_id,
@@ -815,7 +764,7 @@ where
 		}
 
 		if let Some(peer_manager) = self.peer_manager.lock().unwrap().as_ref() {
-			peer_manager.process_events();
+			peer_manager.as_ref().process_events();
 		}
 	}
 
@@ -890,7 +839,7 @@ where
 				}
 
 				if let Some(peer_manager) = self.peer_manager.lock().unwrap().as_ref() {
-					peer_manager.process_events();
+					peer_manager.as_ref().process_events();
 				}
 			}
 			None => {
@@ -1266,35 +1215,12 @@ where
 	}
 }
 
-impl<
-		ES: Deref,
-		M: Deref,
-		T: Deref,
-		F: Deref,
-		R: Deref,
-		SP: Deref,
-		Descriptor: SocketDescriptor,
-		L: Deref,
-		RM: Deref,
-		CM: Deref,
-		OM: Deref,
-		CMH: Deref,
-		NS: Deref,
-	> ProtocolMessageHandler
-	for JITChannelManager<ES, M, T, F, R, SP, Descriptor, L, RM, CM, OM, CMH, NS>
+impl<ES: Deref, CM: Deref + Clone, PM: Deref> ProtocolMessageHandler
+	for JITChannelManager<ES, CM, PM>
 where
 	ES::Target: EntropySource,
-	M::Target: chain::Watch<<SP::Target as SignerProvider>::Signer>,
-	T::Target: BroadcasterInterface,
-	F::Target: FeeEstimator,
-	R::Target: Router,
-	SP::Target: SignerProvider,
-	L::Target: Logger,
-	RM::Target: RoutingMessageHandler,
-	CM::Target: ChannelMessageHandler,
-	OM::Target: OnionMessageHandler,
-	CMH::Target: CustomMessageHandler,
-	NS::Target: NodeSigner,
+	CM::Target: AChannelManager,
+	PM::Target: APeerManager,
 {
 	type ProtocolMessage = LSPS2Message;
 	const PROTOCOL_NUMBER: Option<u16> = Some(2);
