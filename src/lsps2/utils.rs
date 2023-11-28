@@ -1,28 +1,33 @@
+use crate::lsps2::msgs::OpeningFeeParams;
+use crate::utils;
+
 use bitcoin::hashes::hmac::{Hmac, HmacEngine};
 use bitcoin::hashes::sha256::Hash as Sha256;
 use bitcoin::hashes::{Hash, HashEngine};
 
-use std::convert::TryInto;
+#[cfg(feature = "std")]
 use std::time::{SystemTime, UNIX_EPOCH};
-
-use crate::lsps2::msgs::OpeningFeeParams;
-use crate::utils;
 
 /// Determines if the given parameters are valid given the secret used to generate the promise.
 pub fn is_valid_opening_fee_params(
 	fee_params: &OpeningFeeParams, promise_secret: &[u8; 32],
 ) -> bool {
-	let seconds_since_epoch = SystemTime::now()
-		.duration_since(UNIX_EPOCH)
-		.expect("system clock to be ahead of the unix epoch")
-		.as_secs();
-	let valid_until_seconds_since_epoch = fee_params
-		.valid_until
-		.timestamp()
-		.try_into()
-		.expect("expiration to be ahead of unix epoch");
-	if seconds_since_epoch > valid_until_seconds_since_epoch {
-		return false;
+	#[cfg(feature = "std")]
+	{
+		// TODO: We need to find a way to check expiry times in no-std builds.
+		use core::convert::TryInto;
+		let seconds_since_epoch = SystemTime::now()
+			.duration_since(UNIX_EPOCH)
+			.expect("system clock to be ahead of the unix epoch")
+			.as_secs();
+		let valid_until_seconds_since_epoch = fee_params
+			.valid_until
+			.timestamp()
+			.try_into()
+			.expect("expiration to be ahead of unix epoch");
+		if seconds_since_epoch > valid_until_seconds_since_epoch {
+			return false;
+		}
 	}
 
 	let mut hmac = HmacEngine::<Sha256>::new(promise_secret);
@@ -48,5 +53,5 @@ pub fn compute_opening_fee(
 		.checked_mul(opening_fee_proportional)
 		.and_then(|f| f.checked_add(999999))
 		.and_then(|f| f.checked_div(1000000))
-		.map(|f| std::cmp::max(f, opening_fee_min_fee_msat))
+		.map(|f| core::cmp::max(f, opening_fee_min_fee_msat))
 }

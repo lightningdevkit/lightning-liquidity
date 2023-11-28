@@ -1,16 +1,19 @@
-use bitcoin::secp256k1::PublicKey;
-use lightning::ln::msgs::{ErrorAction, LightningError};
-use lightning::sign::EntropySource;
-use lightning::util::logger::Level;
-use std::ops::Deref;
-use std::sync::{Arc, Mutex};
-
 use crate::lsps0::message_handler::ProtocolMessageHandler;
 use crate::lsps0::msgs::{
 	LSPS0Message, LSPS0Request, LSPS0Response, LSPSMessage, ListProtocolsRequest,
 	ListProtocolsResponse, RequestId, ResponseError,
 };
+use crate::prelude::Vec;
+use crate::sync::{Arc, Mutex};
 use crate::utils;
+
+use lightning::ln::msgs::{ErrorAction, LightningError};
+use lightning::sign::EntropySource;
+use lightning::util::logger::Level;
+
+use bitcoin::secp256k1::PublicKey;
+
+use core::ops::Deref;
 
 pub struct LSPS0MessageHandler<ES: Deref>
 where
@@ -104,7 +107,8 @@ where
 #[cfg(test)]
 mod tests {
 
-	use std::sync::Arc;
+	use alloc::string::ToString;
+	use alloc::sync::Arc;
 
 	use super::*;
 

@@ -1,8 +1,10 @@
 use bitcoin::secp256k1::PublicKey;
+use core::{fmt::Write, ops::Deref};
+use lightning::io;
 use lightning::sign::EntropySource;
-use std::{fmt::Write, ops::Deref};
 
 use crate::lsps0::msgs::RequestId;
+use crate::prelude::{String, Vec};
 
 /// Maximum transaction index that can be used in a `short_channel_id`.
 /// This value is based on the 3-bytes available for tx index.
@@ -89,11 +91,11 @@ pub fn to_compressed_pubkey(hex: &str) -> Option<PublicKey> {
 	}
 }
 
-pub fn parse_pubkey(pubkey_str: &str) -> Result<PublicKey, std::io::Error> {
+pub fn parse_pubkey(pubkey_str: &str) -> Result<PublicKey, io::Error> {
 	let pubkey = to_compressed_pubkey(pubkey_str);
 	if pubkey.is_none() {
-		return Err(std::io::Error::new(
-			std::io::ErrorKind::Other,
+		return Err(io::Error::new(
+			io::ErrorKind::Other,
 			"ERROR: unable to parse given pubkey for node",
 		));
 	}

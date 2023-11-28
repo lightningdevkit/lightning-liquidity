@@ -12,6 +12,8 @@ use crate::lsps0::msgs::{LSPSMessage, RawLSPSMessage, LSPS_MESSAGE_TYPE_ID};
 use crate::lsps0::protocol::LSPS0MessageHandler;
 use crate::lsps2::channel_manager::JITChannelManager;
 use crate::lsps2::msgs::{OpeningFeeParams, RawOpeningFeeParams};
+use crate::prelude::{HashMap, String, ToString, Vec};
+use crate::sync::{Arc, Mutex, RwLock};
 
 use lightning::chain::{self, BestBlock, Confirm, Filter, Listen};
 use lightning::ln::channelmanager::{AChannelManager, ChainParameters, InterceptId};
@@ -32,10 +34,8 @@ use bitcoin::BlockHash;
 #[cfg(lsps1)]
 use chrono::Utc;
 
-use std::collections::HashMap;
-use std::convert::TryFrom;
-use std::ops::Deref;
-use std::sync::{Arc, Mutex, RwLock};
+use core::convert::TryFrom;
+use core::ops::Deref;
 
 const LSPS_FEATURE_BIT: usize = 729;
 
@@ -146,7 +146,7 @@ where
 	) -> Self
 where {
 		let pending_messages = Arc::new(Mutex::new(vec![]));
-		let pending_events = Arc::new(EventQueue::default());
+		let pending_events = Arc::new(EventQueue::new());
 
 		let lsps0_message_handler = LSPS0MessageHandler::new(
 			entropy_source.clone().clone(),
@@ -197,11 +197,19 @@ where {
 		}
 	}
 
-	/// Blocks until next event is ready and returns it.
+	/// Blocks the current thread until next event is ready and returns it.
 	///
 	/// Typically you would spawn a thread or task that calls this in a loop.
+	#[cfg(feature = "std")]
 	pub fn wait_next_event(&self) -> Event {
 		self.pending_events.wait_next_event()
+	}
+
+	/// Returns `Some` if an event is ready.
+	///
+	/// Typically you would spawn a thread or task that calls this in a loop.
+	pub fn next_event(&self) -> Option<Event> {
+		self.pending_events.next_event()
 	}
 
 	/// Returns and clears all events without blocking.

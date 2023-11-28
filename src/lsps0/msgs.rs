@@ -7,16 +7,19 @@ use crate::lsps2::msgs::{
 	LSPS2Message, LSPS2Request, LSPS2Response, LSPS2_BUY_METHOD_NAME, LSPS2_GET_INFO_METHOD_NAME,
 	LSPS2_GET_VERSIONS_METHOD_NAME,
 };
+use crate::prelude::{HashMap, String, ToString, Vec};
+
 use lightning::impl_writeable_msg;
 use lightning::ln::wire;
+
 use serde::de;
 use serde::de::{MapAccess, Visitor};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
-use std::collections::HashMap;
-use std::convert::TryFrom;
-use std::fmt;
+
+use core::convert::TryFrom;
+use core::fmt;
 
 const LSPS_MESSAGE_SERIALIZED_STRUCT_NAME: &str = "LSPSMessage";
 const JSONRPC_FIELD_KEY: &str = "jsonrpc";

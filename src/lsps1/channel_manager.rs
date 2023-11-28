@@ -7,12 +7,22 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
-use chrono::Utc;
-use std::collections::HashMap;
-use std::ops::Deref;
-use std::sync::{Arc, Mutex, RwLock};
+use super::msgs::{
+	ChannelInfo, CreateOrderRequest, CreateOrderResponse, GetInfoRequest, GetInfoResponse,
+	GetOrderRequest, GetOrderResponse, LSPS1Message, LSPS1Request, LSPS1Response, OptionsSupported,
+	Order, OrderId, OrderState, Payment, LSPS1_CREATE_ORDER_REQUEST_INVALID_VERSION_ERROR_CODE,
+	LSPS1_CREATE_ORDER_REQUEST_ORDER_MISMATCH_ERROR_CODE,
+};
+use super::utils::is_valid;
 
-use bitcoin::secp256k1::PublicKey;
+use crate::events::EventQueue;
+use crate::lsps0::message_handler::{CRChannelConfig, ProtocolMessageHandler};
+use crate::lsps0::msgs::{LSPSMessage, RequestId};
+use crate::prelude::{HashMap, String, ToString, Vec};
+use crate::sync::{Arc, Mutex, RwLock};
+use crate::utils;
+use crate::{events::Event, lsps0::msgs::ResponseError};
+
 use lightning::chain::Filter;
 use lightning::ln::channelmanager::AChannelManager;
 use lightning::ln::msgs::{ErrorAction, LightningError};
@@ -21,19 +31,10 @@ use lightning::sign::EntropySource;
 use lightning::util::errors::APIError;
 use lightning::util::logger::Level;
 
-use crate::events::EventQueue;
-use crate::lsps0::message_handler::{CRChannelConfig, ProtocolMessageHandler};
-use crate::lsps0::msgs::{LSPSMessage, RequestId};
-use crate::utils;
-use crate::{events::Event, lsps0::msgs::ResponseError};
+use bitcoin::secp256k1::PublicKey;
 
-use super::msgs::{
-	ChannelInfo, CreateOrderRequest, CreateOrderResponse, GetInfoRequest, GetInfoResponse,
-	GetOrderRequest, GetOrderResponse, LSPS1Message, LSPS1Request, LSPS1Response, OptionsSupported,
-	Order, OrderId, OrderState, Payment, LSPS1_CREATE_ORDER_REQUEST_INVALID_VERSION_ERROR_CODE,
-	LSPS1_CREATE_ORDER_REQUEST_ORDER_MISMATCH_ERROR_CODE,
-};
-use super::utils::is_valid;
+use chrono::Utc;
+use core::ops::Deref;
 
 const SUPPORTED_SPEC_VERSIONS: [u16; 1] = [1];
 
@@ -329,11 +330,11 @@ where
 		let inner_state_lock = outer_state_lock
 			.entry(counterparty_node_id)
 			.or_insert(Mutex::new(PeerState::default()));
-		let peer_state = inner_state_lock.get_mut().unwrap();
-		peer_state.insert_inbound_channel(channel_id, channel);
+		let mut peer_state_lock = inner_state_lock.lock().unwrap();
+		peer_state_lock.insert_inbound_channel(channel_id, channel);
 
 		let request_id = self.generate_request_id();
-		peer_state.insert_request(request_id.clone(), channel_id);
+		peer_state_lock.insert_request(request_id.clone(), channel_id);
 
 		{
 			let mut pending_messages = self.pending_messages.lock().unwrap();
@@ -375,10 +376,10 @@ where
 
 		match outer_state_lock.get(counterparty_node_id) {
 			Some(inner_state_lock) => {
-				let mut peer_state = inner_state_lock.lock().unwrap();
+				let mut peer_state_lock = inner_state_lock.lock().unwrap();
 
 				let channel_id =
-					peer_state.request_to_cid.remove(&request_id).ok_or(LightningError {
+					peer_state_lock.request_to_cid.remove(&request_id).ok_or(LightningError {
 						err: format!(
 							"Received get_info response for an unknown request: {:?}",
 							request_id
@@ -386,23 +387,23 @@ where
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					})?;
 
-				let inbound_channel = peer_state
+				let inbound_channel = peer_state_lock
 					.inbound_channels_by_id
 					.get_mut(&channel_id)
 					.ok_or(LightningError {
-						err: format!(
-							"Received get_info response for an unknown channel: {:?}",
-							channel_id
-						),
-						action: ErrorAction::IgnoreAndLog(Level::Info),
-					})?;
+					err: format!(
+						"Received get_info response for an unknown channel: {:?}",
+						channel_id
+					),
+					action: ErrorAction::IgnoreAndLog(Level::Info),
+				})?;
 
 				let version = match inbound_channel
 					.info_received(result.supported_versions, result.options.clone())
 				{
 					Ok(version) => version,
 					Err(e) => {
-						peer_state.remove_inbound_channel(channel_id);
+						peer_state_lock.remove_inbound_channel(channel_id);
 						return Err(e);
 					}
 				};
@@ -436,25 +437,25 @@ where
 
 		match outer_state_lock.get(counterparty_node_id) {
 			Some(inner_state_lock) => {
-				let mut peer_state = inner_state_lock.lock().unwrap();
+				let mut peer_state_lock = inner_state_lock.lock().unwrap();
 
-				let inbound_channel = peer_state
+				let inbound_channel = peer_state_lock
 					.inbound_channels_by_id
 					.get_mut(&channel_id)
 					.ok_or(APIError::APIMisuseError {
-						err: format!("Channel with id {} not found", channel_id),
-					})?;
+					err: format!("Channel with id {} not found", channel_id),
+				})?;
 
 				let version = match inbound_channel.order_requested(order.clone()) {
 					Ok(version) => version,
 					Err(e) => {
-						peer_state.remove_inbound_channel(channel_id);
+						peer_state_lock.remove_inbound_channel(channel_id);
 						return Err(APIError::APIMisuseError { err: e.err });
 					}
 				};
 
 				let request_id = self.generate_request_id();
-				peer_state.insert_request(request_id.clone(), channel_id);
+				peer_state_lock.insert_request(request_id.clone(), channel_id);
 
 				{
 					let mut pending_messages = self.pending_messages.lock().unwrap();
@@ -523,9 +524,9 @@ where
 		let inner_state_lock = outer_state_lock
 			.entry(*counterparty_node_id)
 			.or_insert(Mutex::new(PeerState::default()));
-		let peer_state = inner_state_lock.get_mut().unwrap();
+		let mut peer_state_lock = inner_state_lock.lock().unwrap();
 
-		peer_state
+		peer_state_lock
 			.pending_requests
 			.insert(request_id.clone(), LSPS1Request::CreateOrder(params.clone()));
 
@@ -546,9 +547,9 @@ where
 
 		match outer_state_lock.get(counterparty_node_id) {
 			Some(inner_state_lock) => {
-				let mut peer_state = inner_state_lock.lock().unwrap();
+				let mut peer_state_lock = inner_state_lock.lock().unwrap();
 
-				match peer_state.pending_requests.remove(&request_id) {
+				match peer_state_lock.pending_requests.remove(&request_id) {
 					Some(LSPS1Request::CreateOrder(params)) => {
 						let order_id = self.generate_order_id();
 						let channel = OutboundCRChannel::new(
@@ -559,7 +560,7 @@ where
 							payment.clone(),
 						);
 
-						peer_state.insert_outbound_channel(order_id.clone(), channel);
+						peer_state_lock.insert_outbound_channel(order_id.clone(), channel);
 
 						self.enqueue_response(
 							*counterparty_node_id,
@@ -603,10 +604,10 @@ where
 		let outer_state_lock = self.per_peer_state.read().unwrap();
 		match outer_state_lock.get(&counterparty_node_id) {
 			Some(inner_state_lock) => {
-				let mut peer_state = inner_state_lock.lock().unwrap();
+				let mut peer_state_lock = inner_state_lock.lock().unwrap();
 
 				let channel_id =
-					peer_state.request_to_cid.remove(&request_id).ok_or(LightningError {
+					peer_state_lock.request_to_cid.remove(&request_id).ok_or(LightningError {
 						err: format!(
 							"Received create_order response for an unknown request: {:?}",
 							request_id
@@ -614,21 +615,21 @@ where
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					})?;
 
-				let inbound_channel = peer_state
+				let inbound_channel = peer_state_lock
 					.inbound_channels_by_id
 					.get_mut(&channel_id)
 					.ok_or(LightningError {
-						err: format!(
-							"Received create_order response for an unknown channel: {:?}",
-							channel_id
-						),
-						action: ErrorAction::IgnoreAndLog(Level::Info),
-					})?;
+					err: format!(
+						"Received create_order response for an unknown channel: {:?}",
+						channel_id
+					),
+					action: ErrorAction::IgnoreAndLog(Level::Info),
+				})?;
 
 				if let Err(e) =
 					inbound_channel.order_received(&response.order, response.order_id.clone())
 				{
-					peer_state.remove_inbound_channel(channel_id);
+					peer_state_lock.remove_inbound_channel(channel_id);
 					return Err(e);
 				}
 
@@ -644,7 +645,7 @@ where
 						channel: response.channel,
 					}));
 				} else {
-					peer_state.remove_inbound_channel(channel_id);
+					peer_state_lock.remove_inbound_channel(channel_id);
 					return Err(LightningError {
 						err: format!("Fees are too high : {:?}", total_fees),
 						action: ErrorAction::IgnoreAndLog(Level::Info),
@@ -671,10 +672,10 @@ where
 		let outer_state_lock = self.per_peer_state.read().unwrap();
 		match outer_state_lock.get(&counterparty_node_id) {
 			Some(inner_state_lock) => {
-				let mut peer_state = inner_state_lock.lock().unwrap();
+				let mut peer_state_lock = inner_state_lock.lock().unwrap();
 
 				let channel_id =
-					peer_state.request_to_cid.remove(&request_id).ok_or(LightningError {
+					peer_state_lock.request_to_cid.remove(&request_id).ok_or(LightningError {
 						err: format!(
 							"Received create order error for an unknown request: {:?}",
 							request_id
@@ -682,16 +683,16 @@ where
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					})?;
 
-				let inbound_channel = peer_state
+				let inbound_channel = peer_state_lock
 					.inbound_channels_by_id
 					.get_mut(&channel_id)
 					.ok_or(LightningError {
-						err: format!(
-							"Received create order error for an unknown channel: {:?}",
-							channel_id
-						),
-						action: ErrorAction::IgnoreAndLog(Level::Info),
-					})?;
+					err: format!(
+						"Received create order error for an unknown channel: {:?}",
+						channel_id
+					),
+					action: ErrorAction::IgnoreAndLog(Level::Info),
+				})?;
 				Ok(())
 			}
 			None => {
@@ -706,18 +707,18 @@ where
 		let outer_state_lock = self.per_peer_state.write().unwrap();
 		match outer_state_lock.get(&counterparty_node_id) {
 			Some(inner_state_lock) => {
-				let mut peer_state = inner_state_lock.lock().unwrap();
+				let mut peer_state_lock = inner_state_lock.lock().unwrap();
 
 				if let Some(inbound_channel) =
-					peer_state.inbound_channels_by_id.get_mut(&channel_id)
+					peer_state_lock.inbound_channels_by_id.get_mut(&channel_id)
 				{
 					if let Err(e) = inbound_channel.pay_for_channel(channel_id) {
-						peer_state.remove_inbound_channel(channel_id);
+						peer_state_lock.remove_inbound_channel(channel_id);
 						return Err(APIError::APIMisuseError { err: e.err });
 					}
 
 					let request_id = self.generate_request_id();
-					peer_state.insert_request(request_id.clone(), channel_id);
+					peer_state_lock.insert_request(request_id.clone(), channel_id);
 
 					{
 						let mut pending_messages = self.pending_messages.lock().unwrap();
@@ -757,9 +758,9 @@ where
 		let outer_state_lock = self.per_peer_state.read().unwrap();
 		match outer_state_lock.get(&counterparty_node_id) {
 			Some(inner_state_lock) => {
-				let mut peer_state = inner_state_lock.lock().unwrap();
+				let mut peer_state_lock = inner_state_lock.lock().unwrap();
 
-				let outbound_channel = peer_state
+				let outbound_channel = peer_state_lock
 					.outbound_channels_by_order_id
 					.get_mut(&params.order_id)
 					.ok_or(LightningError {
@@ -771,7 +772,7 @@ where
 					})?;
 
 				if let Err(e) = outbound_channel.create_payment_invoice() {
-					peer_state.outbound_channels_by_order_id.remove(&params.order_id);
+					peer_state_lock.outbound_channels_by_order_id.remove(&params.order_id);
 					self.enqueue_event(Event::LSPS1(super::event::Event::Refund {
 						request_id,
 						counterparty_node_id: *counterparty_node_id,
@@ -780,7 +781,7 @@ where
 					return Err(e);
 				}
 
-				peer_state
+				peer_state_lock
 					.pending_requests
 					.insert(request_id.clone(), LSPS1Request::GetOrder(params.clone()));
 
@@ -809,10 +810,10 @@ where
 
 		match outer_state_lock.get(&counterparty_node_id) {
 			Some(inner_state_lock) => {
-				let mut peer_state = inner_state_lock.lock().unwrap();
+				let mut peer_state_lock = inner_state_lock.lock().unwrap();
 
 				if let Some(outbound_channel) =
-					peer_state.outbound_channels_by_order_id.get_mut(&order_id)
+					peer_state_lock.outbound_channels_by_order_id.get_mut(&order_id)
 				{
 					let config = &outbound_channel.config;
 
@@ -852,10 +853,10 @@ where
 		let outer_state_lock = self.per_peer_state.read().unwrap();
 		match outer_state_lock.get(&counterparty_node_id) {
 			Some(inner_state_lock) => {
-				let mut peer_state = inner_state_lock.lock().unwrap();
+				let mut peer_state_lock = inner_state_lock.lock().unwrap();
 
 				let channel_id =
-					peer_state.request_to_cid.remove(&request_id).ok_or(LightningError {
+					peer_state_lock.request_to_cid.remove(&request_id).ok_or(LightningError {
 						err: format!(
 							"Received get_versions response for an unknown request: {:?}",
 							request_id
@@ -863,16 +864,16 @@ where
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					})?;
 
-				let inbound_channel = peer_state
+				let inbound_channel = peer_state_lock
 					.inbound_channels_by_id
 					.get_mut(&channel_id)
 					.ok_or(LightningError {
-						err: format!(
-							"Received get_versions response for an unknown channel: {:?}",
-							channel_id
-						),
-						action: ErrorAction::IgnoreAndLog(Level::Info),
-					})?;
+					err: format!(
+						"Received get_versions response for an unknown channel: {:?}",
+						channel_id
+					),
+					action: ErrorAction::IgnoreAndLog(Level::Info),
+				})?;
 			}
 			None => {
 				return Err(LightningError {
@@ -894,10 +895,10 @@ where
 		let outer_state_lock = self.per_peer_state.read().unwrap();
 		match outer_state_lock.get(&counterparty_node_id) {
 			Some(inner_state_lock) => {
-				let mut peer_state = inner_state_lock.lock().unwrap();
+				let mut peer_state_lock = inner_state_lock.lock().unwrap();
 
 				let channel_id =
-					peer_state.request_to_cid.remove(&request_id).ok_or(LightningError {
+					peer_state_lock.request_to_cid.remove(&request_id).ok_or(LightningError {
 						err: format!(
 							"Received get_order error for an unknown request: {:?}",
 							request_id
@@ -905,7 +906,7 @@ where
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					})?;
 
-				let _inbound_channel = peer_state
+				let _inbound_channel = peer_state_lock
 					.inbound_channels_by_id
 					.get_mut(&channel_id)
 					.ok_or(LightningError {

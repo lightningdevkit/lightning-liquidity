@@ -7,12 +7,16 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
-use std::collections::HashMap;
-use std::convert::TryInto;
-use std::ops::Deref;
-use std::sync::{Arc, Mutex, RwLock};
+use crate::events::EventQueue;
+use crate::lsps0::message_handler::ProtocolMessageHandler;
+use crate::lsps0::msgs::{LSPSMessage, RequestId};
+use crate::lsps2::utils::{compute_opening_fee, is_valid_opening_fee_params};
+use crate::lsps2::LSPS2Event;
+use crate::prelude::{HashMap, String, ToString, Vec};
+use crate::sync::{Arc, Mutex, RwLock};
+use crate::{events::Event, lsps0::msgs::ResponseError};
+use crate::{utils, JITChannelsConfig};
 
-use bitcoin::secp256k1::PublicKey;
 use lightning::ln::channelmanager::{AChannelManager, InterceptId};
 use lightning::ln::msgs::{ErrorAction, LightningError};
 use lightning::ln::peer_handler::APeerManager;
@@ -21,13 +25,10 @@ use lightning::sign::EntropySource;
 use lightning::util::errors::APIError;
 use lightning::util::logger::Level;
 
-use crate::events::EventQueue;
-use crate::lsps0::message_handler::ProtocolMessageHandler;
-use crate::lsps0::msgs::{LSPSMessage, RequestId};
-use crate::lsps2::utils::{compute_opening_fee, is_valid_opening_fee_params};
-use crate::lsps2::LSPS2Event;
-use crate::{events::Event, lsps0::msgs::ResponseError};
-use crate::{utils, JITChannelsConfig};
+use bitcoin::secp256k1::PublicKey;
+
+use core::convert::TryInto;
+use core::ops::Deref;
 
 use crate::lsps2::msgs::{
 	BuyRequest, BuyResponse, GetInfoRequest, GetInfoResponse, GetVersionsRequest,
@@ -356,7 +357,6 @@ impl OutboundJITChannel {
 	}
 }
 
-#[derive(Default)]
 struct PeerState {
 	inbound_channels_by_id: HashMap<u128, InboundJITChannel>,
 	outbound_channels_by_scid: HashMap<u64, OutboundJITChannel>,
@@ -365,6 +365,14 @@ struct PeerState {
 }
 
 impl PeerState {
+	pub fn new() -> Self {
+		let inbound_channels_by_id = HashMap::new();
+		let outbound_channels_by_scid = HashMap::new();
+		let request_to_cid = HashMap::new();
+		let pending_requests = HashMap::new();
+		Self { inbound_channels_by_id, outbound_channels_by_scid, request_to_cid, pending_requests }
+	}
+
 	pub fn insert_inbound_channel(&mut self, jit_channel_id: u128, channel: InboundJITChannel) {
 		self.inbound_channels_by_id.insert(jit_channel_id, channel);
 	}
@@ -442,14 +450,13 @@ where
 			InboundJITChannel::new(jit_channel_id, user_channel_id, payment_size_msat, token);
 
 		let mut outer_state_lock = self.per_peer_state.write().unwrap();
-		let inner_state_lock = outer_state_lock
-			.entry(counterparty_node_id)
-			.or_insert(Mutex::new(PeerState::default()));
-		let peer_state = inner_state_lock.get_mut().unwrap();
-		peer_state.insert_inbound_channel(jit_channel_id, channel);
+		let inner_state_lock =
+			outer_state_lock.entry(counterparty_node_id).or_insert(Mutex::new(PeerState::new()));
+		let mut peer_state_lock = inner_state_lock.lock().unwrap();
+		peer_state_lock.insert_inbound_channel(jit_channel_id, channel);
 
 		let request_id = self.generate_request_id();
-		peer_state.insert_request(request_id.clone(), jit_channel_id);
+		peer_state_lock.insert_request(request_id.clone(), jit_channel_id);
 
 		{
 			let mut pending_messages = self.pending_messages.lock().unwrap();
@@ -876,11 +883,10 @@ where
 		}
 
 		let mut outer_state_lock = self.per_peer_state.write().unwrap();
-		let inner_state_lock: &mut Mutex<PeerState> = outer_state_lock
-			.entry(*counterparty_node_id)
-			.or_insert(Mutex::new(PeerState::default()));
-		let peer_state = inner_state_lock.get_mut().unwrap();
-		peer_state
+		let inner_state_lock: &mut Mutex<PeerState> =
+			outer_state_lock.entry(*counterparty_node_id).or_insert(Mutex::new(PeerState::new()));
+		let mut peer_state_lock = inner_state_lock.lock().unwrap();
+		peer_state_lock
 			.pending_requests
 			.insert(request_id.clone(), LSPS2Request::GetInfo(params.clone()));
 
@@ -1097,11 +1103,12 @@ where
 		}
 
 		let mut outer_state_lock = self.per_peer_state.write().unwrap();
-		let inner_state_lock = outer_state_lock
-			.entry(*counterparty_node_id)
-			.or_insert(Mutex::new(PeerState::default()));
-		let peer_state = inner_state_lock.get_mut().unwrap();
-		peer_state.pending_requests.insert(request_id.clone(), LSPS2Request::Buy(params.clone()));
+		let inner_state_lock =
+			outer_state_lock.entry(*counterparty_node_id).or_insert(Mutex::new(PeerState::new()));
+		let mut peer_state_lock = inner_state_lock.lock().unwrap();
+		peer_state_lock
+			.pending_requests
+			.insert(request_id.clone(), LSPS2Request::Buy(params.clone()));
 
 		self.enqueue_event(Event::LSPS2(LSPS2Event::BuyRequest {
 			request_id,
@@ -1276,7 +1283,7 @@ fn calculate_amount_to_forward_per_htlc(
 		let proportional_fee_amt_msat =
 			total_fee_msat * htlc.expected_outbound_amount_msat / total_received_msat;
 
-		let mut actual_fee_amt_msat = std::cmp::min(fee_remaining_msat, proportional_fee_amt_msat);
+		let mut actual_fee_amt_msat = core::cmp::min(fee_remaining_msat, proportional_fee_amt_msat);
 		fee_remaining_msat -= actual_fee_amt_msat;
 
 		if index == htlcs.len() - 1 {
