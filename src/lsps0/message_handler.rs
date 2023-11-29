@@ -1,5 +1,3 @@
-#![allow(missing_docs)]
-
 #[cfg(lsps1)]
 use {
 	crate::lsps1::channel_manager::CRManager,
