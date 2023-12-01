@@ -779,31 +779,38 @@ where
 fn calculate_amount_to_forward_per_htlc(
 	htlcs: &[InterceptedHTLC], total_amt_to_forward_msat: u64,
 ) -> Vec<(InterceptId, u64)> {
+	// TODO: we should eventually make sure the HTLCs are all above ChannelDetails::next_outbound_minimum_msat
 	let total_received_msat: u64 =
 		htlcs.iter().map(|htlc| htlc.expected_outbound_amount_msat).sum();
 
-	let mut fee_remaining_msat = total_received_msat - total_amt_to_forward_msat;
-	let total_fee_msat = fee_remaining_msat;
+	match total_received_msat.checked_sub(total_amt_to_forward_msat) {
+		Some(total_fee_msat) => {
+			let mut fee_remaining_msat = total_fee_msat;
 
-	let mut per_htlc_forwards = vec![];
+			let mut per_htlc_forwards = vec![];
 
-	for (index, htlc) in htlcs.iter().enumerate() {
-		let proportional_fee_amt_msat =
-			total_fee_msat * htlc.expected_outbound_amount_msat / total_received_msat;
+			for (index, htlc) in htlcs.iter().enumerate() {
+				let proportional_fee_amt_msat =
+					total_fee_msat * (htlc.expected_outbound_amount_msat / total_received_msat);
 
-		let mut actual_fee_amt_msat = core::cmp::min(fee_remaining_msat, proportional_fee_amt_msat);
-		fee_remaining_msat -= actual_fee_amt_msat;
+				let mut actual_fee_amt_msat =
+					core::cmp::min(fee_remaining_msat, proportional_fee_amt_msat);
+				fee_remaining_msat -= actual_fee_amt_msat;
 
-		if index == htlcs.len() - 1 {
-			actual_fee_amt_msat += fee_remaining_msat;
+				if index == htlcs.len() - 1 {
+					actual_fee_amt_msat += fee_remaining_msat;
+				}
+
+				let amount_to_forward_msat =
+					htlc.expected_outbound_amount_msat.saturating_sub(actual_fee_amt_msat);
+
+				per_htlc_forwards.push((htlc.intercept_id, amount_to_forward_msat))
+			}
+
+			per_htlc_forwards
 		}
-
-		let amount_to_forward_msat = htlc.expected_outbound_amount_msat - actual_fee_amt_msat;
-
-		per_htlc_forwards.push((htlc.intercept_id, amount_to_forward_msat))
+		None => Vec::new(),
 	}
-
-	per_htlc_forwards
 }
 
 #[cfg(test)]
