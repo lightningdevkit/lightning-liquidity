@@ -28,7 +28,7 @@ jobs:
       - name: Pin crates for MSRV
         if: matrix.msrv
         run: |
-          # No need to pin currently
+          cargo update -p proptest --precise "1.2.0" --verbose # proptest 1.3.0 requires rustc 1.64.0
       - name: Cargo check
         run: cargo check --release
       - name: Check documentation
