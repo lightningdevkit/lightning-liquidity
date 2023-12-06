@@ -1,5 +1,3 @@
-#![allow(missing_docs)]
-
 use super::msgs::{ChannelInfo, OptionsSupported, Order, OrderId, Payment};
 
 use crate::lsps0::msgs::RequestId;

@@ -13,7 +13,7 @@
 //! Because we don't have a built-in runtime, it's up to the end-user to poll
 //! [`LiquidityManager::get_and_clear_pending_events`] to receive events.
 //!
-//! [`LiquidityManager::get_and_clear_pending_events`]: crate::LiquidityManager::get_and_clear_pending_events
+//! [`LiquidityManager::get_and_clear_pending_events`]: crate::lsps0::message_handler::LiquidityManager::get_and_clear_pending_events
 
 #[cfg(lsps1)]
 use crate::lsps1;

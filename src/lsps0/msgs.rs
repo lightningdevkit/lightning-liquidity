@@ -1,3 +1,7 @@
+//! Contains basic data types that allow for the (de-)seralization of LSPS messages in the JSON-RPC 2.0 format.
+//!
+//! Please refer to the [LSPS0 specification](https://github.com/BitcoinAndLightningLayerSpecs/lsp/tree/main/LSPS0) for more information.
+
 #[cfg(lsps1)]
 use crate::lsps1::msgs::{
 	LSPS1Message, LSPS1Request, LSPS1Response, LSPS1_CREATE_ORDER_METHOD_NAME,
@@ -51,30 +55,56 @@ impl wire::Type for RawLSPSMessage {
 	}
 }
 
+/// A JSON-RPC request's `id`.
+///
+/// Please refer to the [JSON-RPC 2.0 specification](https://www.jsonrpc.org/specification#request_object) for
+/// more information.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct RequestId(pub String);
 
+/// An error returned in response to an JSON-RPC request.
+///
+/// Please refer to the [JSON-RPC 2.0 specification](https://www.jsonrpc.org/specification#error_object) for
+/// more information.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ResponseError {
+	/// A number that indicates the error type that occurred.
 	pub code: i32,
+	/// A string providing a short description of the error.
 	pub message: String,
+	/// A primitive or structured value that contains additional information about the error.
 	pub data: Option<String>,
 }
 
+/// A `list_protocols` request.
+///
+/// Please refer to the [LSPS0 specification](https://github.com/BitcoinAndLightningLayerSpecs/lsp/tree/main/LSPS0#lsps-specification-support-query)
+/// for more information.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct ListProtocolsRequest {}
 
+/// A response to a `list_protocols` request.
+///
+/// Please refer to the [LSPS0 specification](https://github.com/BitcoinAndLightningLayerSpecs/lsp/tree/main/LSPS0#lsps-specification-support-query)
+/// for more information.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ListProtocolsResponse {
+	/// A list of supported protocols.
 	pub protocols: Vec<u16>,
 }
 
+/// An LSPS0 protocol request.
+///
+/// Please refer to the [LSPS0 specification](https://github.com/BitcoinAndLightningLayerSpecs/lsp/tree/main/LSPS0)
+/// for more information.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LSPS0Request {
+	/// A request calling `list_protocols`.
 	ListProtocols(ListProtocolsRequest),
 }
 
 impl LSPS0Request {
+	/// Returns the method name associated with the given request variant.
 	pub fn method(&self) -> &str {
 		match self {
 			LSPS0Request::ListProtocols(_) => LSPS0_LISTPROTOCOLS_METHOD_NAME,
@@ -82,15 +112,27 @@ impl LSPS0Request {
 	}
 }
 
+/// An LSPS0 protocol request.
+///
+/// Please refer to the [LSPS0 specification](https://github.com/BitcoinAndLightningLayerSpecs/lsp/tree/main/LSPS0)
+/// for more information.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LSPS0Response {
+	/// A response to a `list_protocols` request.
 	ListProtocols(ListProtocolsResponse),
+	/// An error response to a `list_protocols` request.
 	ListProtocolsError(ResponseError),
 }
 
+/// An LSPS0 protocol message.
+///
+/// Please refer to the [LSPS0 specification](https://github.com/BitcoinAndLightningLayerSpecs/lsp/tree/main/LSPS0)
+/// for more information.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LSPS0Message {
+	/// A request variant.
 	Request(RequestId, LSPS0Request),
+	/// A response variant.
 	Response(RequestId, LSPS0Response),
 }
 
@@ -114,16 +156,25 @@ impl From<LSPS0Message> for LSPSMessage {
 	}
 }
 
+/// A (de-)serializable LSPS message allowing to be sent over the wire.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LSPSMessage {
+	/// An invalid variant.
 	Invalid,
+	/// An LSPS0 message.
 	LSPS0(LSPS0Message),
+	/// An LSPS1 message.
 	#[cfg(lsps1)]
 	LSPS1(LSPS1Message),
+	/// An LSPS2 message.
 	LSPS2(LSPS2Message),
 }
 
 impl LSPSMessage {
+	/// A constructor returning an `LSPSMessage` from a raw JSON string.
+	///
+	/// The given `request_id_to_method` associates request ids with method names, as response objects
+	/// don't carry the latter.
 	pub fn from_str_with_id_map(
 		json_str: &str, request_id_to_method: &mut HashMap<String, String>,
 	) -> Result<Self, serde_json::Error> {
@@ -132,6 +183,7 @@ impl LSPSMessage {
 		deserializer.deserialize_any(visitor)
 	}
 
+	/// Returns the request id and the method.
 	pub fn get_request_id_and_method(&self) -> Option<(String, String)> {
 		match self {
 			LSPSMessage::LSPS0(LSPS0Message::Request(request_id, request)) => {

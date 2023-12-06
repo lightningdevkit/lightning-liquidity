@@ -1,3 +1,9 @@
+//! Contains the logic to handle LSPS0 protocol messages.
+//!
+//! Please refer to the [LSPS0
+//! specifcation](https://github.com/BitcoinAndLightningLayerSpecs/lsp/tree/main/LSPS0) for more
+//! information.
+
 use crate::lsps0::message_handler::ProtocolMessageHandler;
 use crate::lsps0::msgs::{
 	LSPS0Message, LSPS0Request, LSPS0Response, LSPSMessage, ListProtocolsRequest,
@@ -15,6 +21,7 @@ use bitcoin::secp256k1::PublicKey;
 
 use core::ops::Deref;
 
+/// A message handler capable of sending and handling LSPS0 messages.
 pub struct LSPS0MessageHandler<ES: Deref>
 where
 	ES::Target: EntropySource,
@@ -28,6 +35,7 @@ impl<ES: Deref> LSPS0MessageHandler<ES>
 where
 	ES::Target: EntropySource,
 {
+	/// Returns a new instance of [`LSPS0MessageHandler`].
 	pub fn new(
 		entropy_source: ES, protocols: Vec<u16>,
 		pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
@@ -35,6 +43,11 @@ where
 		Self { entropy_source, protocols, pending_messages }
 	}
 
+	/// Calls LSPS0's `list_protocols`.
+	///
+	/// Please refer to the [LSPS0
+	/// specifcation](https://github.com/BitcoinAndLightningLayerSpecs/lsp/tree/main/LSPS0#lsps-specification-support-query)
+	/// for more information.
 	pub fn list_protocols(&self, counterparty_node_id: PublicKey) {
 		let msg = LSPS0Message::Request(
 			utils::generate_request_id(&self.entropy_source),
@@ -66,10 +79,10 @@ where
 	}
 
 	fn handle_response(
-		&self, response: LSPS0Response, counterparty_node_id: &PublicKey,
+		&self, response: LSPS0Response, _counterparty_node_id: &PublicKey,
 	) -> Result<(), LightningError> {
 		match response {
-			LSPS0Response::ListProtocols(ListProtocolsResponse { protocols }) => Ok(()),
+			LSPS0Response::ListProtocols(ListProtocolsResponse { protocols: _ }) => Ok(()),
 			LSPS0Response::ListProtocolsError(ResponseError { code, message, data, .. }) => {
 				Err(LightningError {
 					err: format!(

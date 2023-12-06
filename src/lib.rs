@@ -39,11 +39,9 @@ mod prelude {
 }
 
 pub mod events;
-mod lsps0;
+pub mod lsps0;
 #[cfg(lsps1)]
 mod lsps1;
 pub mod lsps2;
 mod sync;
 mod utils;
-
-pub use lsps0::message_handler::{JITChannelsConfig, LiquidityManager, LiquidityProviderConfig};

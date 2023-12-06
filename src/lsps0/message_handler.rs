@@ -1,4 +1,4 @@
-#![allow(missing_docs)]
+//! Contains a [`CustomMessageHandler`] implementation for LSPS messages.
 
 #[cfg(lsps1)]
 use {
