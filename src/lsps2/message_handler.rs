@@ -12,8 +12,8 @@
 use crate::events::EventQueue;
 use crate::lsps0::message_handler::ProtocolMessageHandler;
 use crate::lsps0::msgs::{LSPSMessage, RequestId};
+use crate::lsps2::event::LSPS2Event;
 use crate::lsps2::utils::{compute_opening_fee, is_valid_opening_fee_params};
-use crate::lsps2::LSPS2Event;
 use crate::prelude::{HashMap, String, ToString, Vec};
 use crate::sync::{Arc, Mutex, RwLock};
 use crate::utils;
@@ -513,7 +513,7 @@ where
 	///
 	/// Should be called in response to receiving a [`LSPS2Event::GetInfo`] event.
 	///
-	/// [`LSPS2Event::GetInfo`]: crate::lsps2::LSPS2Event::GetInfo
+	/// [`LSPS2Event::GetInfo`]: crate::lsps2::event::LSPS2Event::GetInfo
 	pub fn invalid_token_provided(
 		&self, counterparty_node_id: PublicKey, request_id: RequestId,
 	) -> Result<(), APIError> {
@@ -551,7 +551,7 @@ where
 	///
 	/// Should be called in response to receiving a [`LSPS2Event::GetInfo`] event.
 	///
-	/// [`LSPS2Event::GetInfo`]: crate::lsps2::LSPS2Event::GetInfo
+	/// [`LSPS2Event::GetInfo`]: crate::lsps2::event::LSPS2Event::GetInfo
 	pub fn opening_fee_params_generated(
 		&self, counterparty_node_id: PublicKey, request_id: RequestId,
 		opening_fee_params_menu: Vec<RawOpeningFeeParams>,
@@ -595,7 +595,7 @@ where
 	///
 	/// Should be called in response to receiving a [`LSPS2Event::GetInfoResponse`] event.
 	///
-	/// [`LSPS2Event::GetInfoResponse`]: crate::lsps2::LSPS2Event::GetInfoResponse
+	/// [`LSPS2Event::GetInfoResponse`]: crate::lsps2::event::LSPS2Event::GetInfoResponse
 	pub fn opening_fee_params_selected(
 		&self, counterparty_node_id: PublicKey, jit_channel_id: u128,
 		opening_fee_params: OpeningFeeParams,
@@ -657,7 +657,7 @@ where
 	///
 	/// Should be called in response to receiving a [`LSPS2Event::BuyRequest`] event.
 	///
-	/// [`LSPS2Event::BuyRequest`]: crate::lsps2::LSPS2Event::BuyRequest
+	/// [`LSPS2Event::BuyRequest`]: crate::lsps2::event::LSPS2Event::BuyRequest
 	pub fn invoice_parameters_generated(
 		&self, counterparty_node_id: PublicKey, request_id: RequestId, scid: u64,
 		cltv_expiry_delta: u32, client_trusts_lsp: bool,
@@ -719,7 +719,7 @@ where
 	/// Will do nothing if the scid does not match any of the ones we gave out.
 	///
 	/// [`Event::HTLCIntercepted`]: lightning::events::Event::HTLCIntercepted
-	/// [`LSPS2Event::OpenChannel`]: crate::lsps2::LSPS2Event::OpenChannel
+	/// [`LSPS2Event::OpenChannel`]: crate::lsps2::event::LSPS2Event::OpenChannel
 	pub fn htlc_intercepted(
 		&self, scid: u64, intercept_id: InterceptId, expected_outbound_amount_msat: u64,
 	) -> Result<(), APIError> {

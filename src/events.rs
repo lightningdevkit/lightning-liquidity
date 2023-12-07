@@ -79,7 +79,7 @@ impl EventQueue {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
 	/// An LSPS2 (JIT Channel) protocol event.
-	LSPS2(lsps2::LSPS2Event),
+	LSPS2(lsps2::event::LSPS2Event),
 	/// An LSPS1 protocol event.
 	#[cfg(lsps1)]
 	LSPS1(lsps1::event::Event),

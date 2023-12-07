@@ -13,6 +13,3 @@ pub mod event;
 pub mod message_handler;
 pub mod msgs;
 pub(crate) mod utils;
-
-pub use event::LSPS2Event;
-pub use msgs::{BuyResponse, GetInfoResponse, OpeningFeeParams, RawOpeningFeeParams};
