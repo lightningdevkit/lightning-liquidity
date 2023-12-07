@@ -97,8 +97,8 @@ pub struct CRChannelConfig {
 /// Users need to continually poll [`LiquidityManager::get_and_clear_pending_events`] in order to surface
 /// [`Event`]'s that likely need to be handled.
 ///
-/// Users must forward the [`Event::HTLCIntercepted`] event parameters to [`LiquidityManager::htlc_intercepted`]
-/// and the [`Event::ChannelReady`] event parameters to [`LiquidityManager::channel_ready`].
+/// If configured, users must forward the [`Event::HTLCIntercepted`] event parameters to [`JITChannelManager::htlc_intercepted`]
+/// and the [`Event::ChannelReady`] event parameters to [`JITChannelManager::channel_ready`].
 ///
 /// [`PeerManager`]: lightning::ln::peer_handler::PeerManager
 /// [`MessageHandler`]: lightning::ln::peer_handler::MessageHandler
@@ -197,6 +197,22 @@ where {
 		}
 	}
 
+	/// Returns a reference to the LSPS0 message handler.
+	pub fn lsps0_message_handler(&self) -> &LSPS0MessageHandler<ES> {
+		&self.lsps0_message_handler
+	}
+
+	/// Returns a reference to the LSPS1 message handler.
+	#[cfg(lsps1)]
+	pub fn lsps1_message_handler(&self) -> Option<&CRManager<ES, CM, PM, C>> {
+		self.lsps1_message_handler.as_ref()
+	}
+
+	/// Returns a reference to the LSPS2 message handler.
+	pub fn lsps2_message_handler(&self) -> Option<&JITChannelManager<ES, CM, PM>> {
+		self.lsps2_message_handler.as_ref()
+	}
+
 	/// Blocks the current thread until next event is ready and returns it.
 	///
 	/// Typically you would spawn a thread or task that calls this in a loop.
@@ -219,7 +235,7 @@ where {
 		self.pending_events.get_and_clear_pending_events()
 	}
 
-	/// Set a [`PeerManager`] reference for the message handlers.
+	/// Set a [`PeerManager`] reference for all configured message handlers.
 	///
 	/// This allows the message handlers to wake the [`PeerManager`] by calling
 	/// [`PeerManager::process_events`] after enqueing messages to be sent.
@@ -237,240 +253,6 @@ where {
 		if let Some(lsps2_message_handler) = &self.lsps2_message_handler {
 			lsps2_message_handler.set_peer_manager(peer_manager);
 		}
-	}
-
-	#[cfg(lsps1)]
-	pub fn request_for_info(
-		&self, counterparty_node_id: PublicKey, channel_id: u128,
-	) -> Result<(), APIError> {
-		if let Some(lsps1_message_handler) = &self.lsps1_message_handler {
-			lsps1_message_handler.request_for_info(counterparty_node_id, channel_id);
-		}
-		Ok(())
-	}
-
-	#[cfg(lsps1)]
-	pub fn place_order(
-		&self, channel_id: u128, counterparty_node_id: &PublicKey, order: Order,
-	) -> Result<(), APIError> {
-		if let Some(lsps1_message_handler) = &self.lsps1_message_handler {
-			lsps1_message_handler.place_order(channel_id, counterparty_node_id, order)?;
-		}
-		Ok(())
-	}
-
-	#[cfg(lsps1)]
-	pub fn send_invoice_for_order(
-		&self, request_id: RequestId, counterparty_node_id: &PublicKey, payment: Payment,
-		created_at: chrono::DateTime<Utc>, expires_at: chrono::DateTime<Utc>,
-	) -> Result<(), APIError> {
-		if let Some(lsps1_message_handler) = &self.lsps1_message_handler {
-			lsps1_message_handler.send_invoice_for_order(
-				request_id,
-				counterparty_node_id,
-				payment,
-				created_at,
-				expires_at,
-			)?;
-		}
-		Ok(())
-	}
-
-	#[cfg(lsps1)]
-	pub fn check_order_status(
-		self, channel_id: u128, counterparty_node_id: &PublicKey, order_id: OrderId,
-	) -> Result<(), APIError> {
-		if let Some(lsps1_message_handler) = &self.lsps1_message_handler {
-			lsps1_message_handler.check_order_status(counterparty_node_id, order_id, channel_id)?;
-		}
-		Ok(())
-	}
-
-	#[cfg(lsps1)]
-	pub fn update_order_status(
-		&self, request_id: RequestId, counterparty_node_id: PublicKey, order_id: OrderId,
-		order_state: OrderState, channel: Option<ChannelInfo>,
-	) -> Result<(), APIError> {
-		if let Some(lsps1_message_handler) = &self.lsps1_message_handler {
-			lsps1_message_handler.update_order_status(
-				request_id,
-				counterparty_node_id,
-				order_id,
-				order_state,
-				channel,
-			)?;
-		}
-		Ok(())
-	}
-
-	/// Initiate the creation of an invoice that when paid will open a channel
-	/// with enough inbound liquidity to be able to receive the payment.
-	///
-	/// `counterparty_node_id` is the node_id of the LSP you would like to use.
-	///
-	/// If `payment_size_msat` is [`Option::Some`] then the invoice will be for a fixed amount
-	/// and MPP can be used to pay it.
-	///
-	/// If `payment_size_msat` is [`Option::None`] then the invoice can be for an arbitrary amount
-	/// but MPP can no longer be used to pay it.
-	///
-	/// `token` is an optional String that will be provided to the LSP.
-	/// It can be used by the LSP as an API key, coupon code, or some other way to identify a user.
-	pub fn lsps2_create_invoice(
-		&self, counterparty_node_id: PublicKey, payment_size_msat: Option<u64>,
-		token: Option<String>, user_channel_id: u128,
-	) -> Result<(), APIError> {
-		if let Some(lsps2_message_handler) = &self.lsps2_message_handler {
-			lsps2_message_handler.create_invoice(
-				counterparty_node_id,
-				payment_size_msat,
-				token,
-				user_channel_id,
-			);
-			Ok(())
-		} else {
-			Err(APIError::APIMisuseError {
-				err: "JIT Channels were not configured when LSPManager was instantiated"
-					.to_string(),
-			})
-		}
-	}
-
-	/// Used by LSP to inform a client requesting a JIT Channel the token they used is invalid.
-	///
-	/// Should be called in response to receiving a [`LSPS2Event::GetInfo`] event.
-	///
-	/// [`LSPS2Event::GetInfo`]: crate::lsps2::LSPS2Event::GetInfo
-	pub fn invalid_token_provided(
-		&self, counterparty_node_id: PublicKey, request_id: RequestId,
-	) -> Result<(), APIError> {
-		if let Some(lsps2_message_handler) = &self.lsps2_message_handler {
-			lsps2_message_handler.invalid_token_provided(counterparty_node_id, request_id)
-		} else {
-			Err(APIError::APIMisuseError {
-				err: "JIT Channels were not configured when LSPManager was instantiated"
-					.to_string(),
-			})
-		}
-	}
-
-	/// Used by LSP to provide fee parameters to a client requesting a JIT Channel.
-	///
-	/// Should be called in response to receiving a [`LSPS2Event::GetInfo`] event.
-	///
-	/// [`LSPS2Event::GetInfo`]: crate::lsps2::LSPS2Event::GetInfo
-	pub fn opening_fee_params_generated(
-		&self, counterparty_node_id: PublicKey, request_id: RequestId,
-		opening_fee_params_menu: Vec<RawOpeningFeeParams>,
-	) -> Result<(), APIError> {
-		if let Some(lsps2_message_handler) = &self.lsps2_message_handler {
-			lsps2_message_handler.opening_fee_params_generated(
-				counterparty_node_id,
-				request_id,
-				opening_fee_params_menu,
-			)
-		} else {
-			Err(APIError::APIMisuseError {
-				err: "JIT Channels were not configured when LSPManager was instantiated"
-					.to_string(),
-			})
-		}
-	}
-
-	/// Used by client to confirm which channel parameters to use for the JIT Channel buy request.
-	/// The client agrees to paying an opening fee equal to
-	/// `max(min_fee_msat, proportional*(payment_size_msat/1_000_000))`.
-	///
-	/// Should be called in response to receiving a [`LSPS2Event::GetInfoResponse`] event.
-	///
-	/// [`LSPS2Event::GetInfoResponse`]: crate::lsps2::LSPS2Event::GetInfoResponse
-	pub fn opening_fee_params_selected(
-		&self, counterparty_node_id: PublicKey, channel_id: u128,
-		opening_fee_params: OpeningFeeParams,
-	) -> Result<(), APIError> {
-		if let Some(lsps2_message_handler) = &self.lsps2_message_handler {
-			lsps2_message_handler.opening_fee_params_selected(
-				counterparty_node_id,
-				channel_id,
-				opening_fee_params,
-			)
-		} else {
-			Err(APIError::APIMisuseError {
-				err: "JIT Channels were not configured when LSPManager was instantiated"
-					.to_string(),
-			})
-		}
-	}
-
-	/// Used by LSP to provide client with the scid and cltv_expiry_delta to use in their invoice.
-	///
-	/// Should be called in response to receiving a [`LSPS2Event::BuyRequest`] event.
-	///
-	/// [`LSPS2Event::BuyRequest`]: crate::lsps2::LSPS2Event::BuyRequest
-	pub fn invoice_parameters_generated(
-		&self, counterparty_node_id: PublicKey, request_id: RequestId, scid: u64,
-		cltv_expiry_delta: u32, client_trusts_lsp: bool,
-	) -> Result<(), APIError> {
-		if let Some(lsps2_message_handler) = &self.lsps2_message_handler {
-			lsps2_message_handler.invoice_parameters_generated(
-				counterparty_node_id,
-				request_id,
-				scid,
-				cltv_expiry_delta,
-				client_trusts_lsp,
-			)
-		} else {
-			Err(APIError::APIMisuseError {
-				err: "JIT Channels were not configured when LSPManager was instantiated"
-					.to_string(),
-			})
-		}
-	}
-
-	/// Forward [`Event::HTLCIntercepted`] event parameters into this function.
-	///
-	/// Will fail the intercepted HTLC if the scid matches a payment we are expecting
-	/// but the payment amount is incorrect or the expiry has passed.
-	///
-	/// Will generate a [`LSPS2Event::OpenChannel`] event if the scid matches a payment we are expected
-	/// and the payment amount is correct and the offer has not expired.
-	///
-	/// Will do nothing if the scid does not match any of the ones we gave out.
-	///
-	/// [`Event::HTLCIntercepted`]: lightning::events::Event::HTLCIntercepted
-	/// [`LSPS2Event::OpenChannel`]: crate::lsps2::LSPS2Event::OpenChannel
-	pub fn htlc_intercepted(
-		&self, scid: u64, intercept_id: InterceptId, expected_outbound_amount_msat: u64,
-	) -> Result<(), APIError> {
-		if let Some(lsps2_message_handler) = &self.lsps2_message_handler {
-			lsps2_message_handler.htlc_intercepted(
-				scid,
-				intercept_id,
-				expected_outbound_amount_msat,
-			)?;
-		}
-
-		Ok(())
-	}
-
-	/// Forward [`Event::ChannelReady`] event parameters into this function.
-	///
-	/// Will forward the intercepted HTLC if it matches a channel
-	/// we need to forward a payment over otherwise it will be ignored.
-	///
-	/// [`Event::ChannelReady`]: lightning::events::Event::ChannelReady
-	pub fn channel_ready(
-		&self, user_channel_id: u128, channel_id: &ChannelId, counterparty_node_id: &PublicKey,
-	) -> Result<(), APIError> {
-		if let Some(lsps2_message_handler) = &self.lsps2_message_handler {
-			lsps2_message_handler.channel_ready(
-				user_channel_id,
-				channel_id,
-				counterparty_node_id,
-			)?;
-		}
-
-		Ok(())
 	}
 
 	fn handle_lsps_message(

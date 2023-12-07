@@ -7,6 +7,8 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
+//! Contains the main LSPS2 object, `JITChannelManager`.
+
 use crate::events::EventQueue;
 use crate::lsps0::message_handler::{JITChannelsConfig, ProtocolMessageHandler};
 use crate::lsps0::msgs::{LSPSMessage, RequestId};
@@ -141,9 +143,7 @@ struct InboundJITChannel {
 }
 
 impl InboundJITChannel {
-	pub fn new(
-		id: u128, user_id: u128, payment_size_msat: Option<u64>, token: Option<String>,
-	) -> Self {
+	fn new(id: u128, user_id: u128, payment_size_msat: Option<u64>, token: Option<String>) -> Self {
 		Self {
 			id,
 			config: InboundJITChannelConfig { user_id, payment_size_msat, token },
@@ -151,7 +151,7 @@ impl InboundJITChannel {
 		}
 	}
 
-	pub fn versions_received(&mut self, versions: Vec<u16>) -> Result<u16, LightningError> {
+	fn versions_received(&mut self, versions: Vec<u16>) -> Result<u16, LightningError> {
 		self.state = self.state.versions_received(versions)?;
 
 		match self.state {
@@ -163,12 +163,12 @@ impl InboundJITChannel {
 		}
 	}
 
-	pub fn info_received(&mut self) -> Result<(), LightningError> {
+	fn info_received(&mut self) -> Result<(), LightningError> {
 		self.state = self.state.info_received()?;
 		Ok(())
 	}
 
-	pub fn opening_fee_params_selected(&mut self) -> Result<u16, LightningError> {
+	fn opening_fee_params_selected(&mut self) -> Result<u16, LightningError> {
 		self.state = self.state.opening_fee_params_selected()?;
 
 		match self.state {
@@ -180,7 +180,7 @@ impl InboundJITChannel {
 		}
 	}
 
-	pub fn invoice_params_received(
+	fn invoice_params_received(
 		&mut self, client_trusts_lsp: bool, jit_channel_scid: JitChannelScid,
 	) -> Result<(), LightningError> {
 		self.state = self.state.invoice_params_received(client_trusts_lsp, jit_channel_scid)?;
@@ -208,7 +208,7 @@ enum OutboundJITChannelState {
 }
 
 impl OutboundJITChannelState {
-	pub fn new(payment_size_msat: Option<u64>, opening_fee_params: OpeningFeeParams) -> Self {
+	fn new(payment_size_msat: Option<u64>, opening_fee_params: OpeningFeeParams) -> Self {
 		OutboundJITChannelState::AwaitingPayment {
 			min_fee_msat: opening_fee_params.min_fee_msat,
 			proportional_fee: opening_fee_params.proportional,
@@ -217,7 +217,7 @@ impl OutboundJITChannelState {
 		}
 	}
 
-	pub fn htlc_intercepted(&self, htlc: InterceptedHTLC) -> Result<Self, ChannelStateError> {
+	fn htlc_intercepted(&self, htlc: InterceptedHTLC) -> Result<Self, ChannelStateError> {
 		match self {
 			OutboundJITChannelState::AwaitingPayment {
 				htlcs,
@@ -278,7 +278,7 @@ impl OutboundJITChannelState {
 		}
 	}
 
-	pub fn channel_ready(&self) -> Result<Self, ChannelStateError> {
+	fn channel_ready(&self) -> Result<Self, ChannelStateError> {
 		match self {
 			OutboundJITChannelState::PendingChannelOpen { htlcs, amt_to_forward_msat, .. } => {
 				Ok(OutboundJITChannelState::ChannelReady {
@@ -302,7 +302,7 @@ struct OutboundJITChannel {
 }
 
 impl OutboundJITChannel {
-	pub fn new(
+	fn new(
 		scid: u64, cltv_expiry_delta: u32, client_trusts_lsp: bool, payment_size_msat: Option<u64>,
 		opening_fee_params: OpeningFeeParams,
 	) -> Self {
@@ -314,7 +314,7 @@ impl OutboundJITChannel {
 		}
 	}
 
-	pub fn htlc_intercepted(
+	fn htlc_intercepted(
 		&mut self, htlc: InterceptedHTLC,
 	) -> Result<Option<(u64, u64)>, LightningError> {
 		self.state = self.state.htlc_intercepted(htlc)?;
@@ -339,7 +339,7 @@ impl OutboundJITChannel {
 		}
 	}
 
-	pub fn channel_ready(&mut self) -> Result<(Vec<InterceptedHTLC>, u64), LightningError> {
+	fn channel_ready(&mut self) -> Result<(Vec<InterceptedHTLC>, u64), LightningError> {
 		self.state = self.state.channel_ready()?;
 
 		match &self.state {
@@ -365,7 +365,7 @@ struct PeerState {
 }
 
 impl PeerState {
-	pub fn new() -> Self {
+	fn new() -> Self {
 		let inbound_channels_by_id = HashMap::new();
 		let outbound_channels_by_scid = HashMap::new();
 		let request_to_cid = HashMap::new();
@@ -373,27 +373,28 @@ impl PeerState {
 		Self { inbound_channels_by_id, outbound_channels_by_scid, request_to_cid, pending_requests }
 	}
 
-	pub fn insert_inbound_channel(&mut self, jit_channel_id: u128, channel: InboundJITChannel) {
+	fn insert_inbound_channel(&mut self, jit_channel_id: u128, channel: InboundJITChannel) {
 		self.inbound_channels_by_id.insert(jit_channel_id, channel);
 	}
 
-	pub fn insert_outbound_channel(&mut self, scid: u64, channel: OutboundJITChannel) {
+	fn insert_outbound_channel(&mut self, scid: u64, channel: OutboundJITChannel) {
 		self.outbound_channels_by_scid.insert(scid, channel);
 	}
 
-	pub fn insert_request(&mut self, request_id: RequestId, jit_channel_id: u128) {
+	fn insert_request(&mut self, request_id: RequestId, jit_channel_id: u128) {
 		self.request_to_cid.insert(request_id, jit_channel_id);
 	}
 
-	pub fn remove_inbound_channel(&mut self, jit_channel_id: u128) {
+	fn remove_inbound_channel(&mut self, jit_channel_id: u128) {
 		self.inbound_channels_by_id.remove(&jit_channel_id);
 	}
 
-	pub fn remove_outbound_channel(&mut self, scid: u64) {
+	fn remove_outbound_channel(&mut self, scid: u64) {
 		self.outbound_channels_by_scid.remove(&scid);
 	}
 }
 
+/// The main object allowing to send and receive LSPS2 messages.
 pub struct JITChannelManager<ES: Deref, CM: Deref + Clone, PM: Deref>
 where
 	ES::Target: EntropySource,
@@ -418,6 +419,7 @@ where
 	CM::Target: AChannelManager,
 	PM::Target: APeerManager,
 {
+	/// Constructs a `JITChannelManager`.
 	pub(crate) fn new(
 		entropy_source: ES, config: &JITChannelsConfig,
 		pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
@@ -437,10 +439,33 @@ where
 		}
 	}
 
+	/// Set a [`PeerManager`] reference for the message handler.
+	///
+	/// This allows the message handler to wake the [`PeerManager`] by calling
+	/// [`PeerManager::process_events`] after enqueing messages to be sent.
+	///
+	/// Without this the messages will be sent based on whatever polling interval
+	/// your background processor uses.
+	///
+	/// [`PeerManager`]: lightning::ln::peer_handler::PeerManager
+	/// [`PeerManager::process_events`]: lightning::ln::peer_handler::PeerManager::process_events
 	pub fn set_peer_manager(&self, peer_manager: PM) {
 		*self.peer_manager.lock().unwrap() = Some(peer_manager);
 	}
 
+	/// Initiate the creation of an invoice that when paid will open a channel
+	/// with enough inbound liquidity to be able to receive the payment.
+	///
+	/// `counterparty_node_id` is the node_id of the LSP you would like to use.
+	///
+	/// If `payment_size_msat` is [`Option::Some`] then the invoice will be for a fixed amount
+	/// and MPP can be used to pay it.
+	///
+	/// If `payment_size_msat` is [`Option::None`] then the invoice can be for an arbitrary amount
+	/// but MPP can no longer be used to pay it.
+	///
+	/// `token` is an optional String that will be provided to the LSP.
+	/// It can be used by the LSP as an API key, coupon code, or some other way to identify a user.
 	pub fn create_invoice(
 		&self, counterparty_node_id: PublicKey, payment_size_msat: Option<u64>,
 		token: Option<String>, user_channel_id: u128,
@@ -472,6 +497,11 @@ where
 		}
 	}
 
+	/// Used by LSP to inform a client requesting a JIT Channel the token they used is invalid.
+	///
+	/// Should be called in response to receiving a [`LSPS2Event::GetInfo`] event.
+	///
+	/// [`LSPS2Event::GetInfo`]: crate::lsps2::LSPS2Event::GetInfo
 	pub fn invalid_token_provided(
 		&self, counterparty_node_id: PublicKey, request_id: RequestId,
 	) -> Result<(), APIError> {
@@ -505,6 +535,11 @@ where
 		}
 	}
 
+	/// Used by LSP to provide fee parameters to a client requesting a JIT Channel.
+	///
+	/// Should be called in response to receiving a [`LSPS2Event::GetInfo`] event.
+	///
+	/// [`LSPS2Event::GetInfo`]: crate::lsps2::LSPS2Event::GetInfo
 	pub fn opening_fee_params_generated(
 		&self, counterparty_node_id: PublicKey, request_id: RequestId,
 		opening_fee_params_menu: Vec<RawOpeningFeeParams>,
@@ -542,6 +577,13 @@ where
 		}
 	}
 
+	/// Used by client to confirm which channel parameters to use for the JIT Channel buy request.
+	/// The client agrees to paying an opening fee equal to
+	/// `max(min_fee_msat, proportional*(payment_size_msat/1_000_000))`.
+	///
+	/// Should be called in response to receiving a [`LSPS2Event::GetInfoResponse`] event.
+	///
+	/// [`LSPS2Event::GetInfoResponse`]: crate::lsps2::LSPS2Event::GetInfoResponse
 	pub fn opening_fee_params_selected(
 		&self, counterparty_node_id: PublicKey, jit_channel_id: u128,
 		opening_fee_params: OpeningFeeParams,
@@ -599,6 +641,11 @@ where
 		Ok(())
 	}
 
+	/// Used by LSP to provide client with the scid and cltv_expiry_delta to use in their invoice.
+	///
+	/// Should be called in response to receiving a [`LSPS2Event::BuyRequest`] event.
+	///
+	/// [`LSPS2Event::BuyRequest`]: crate::lsps2::LSPS2Event::BuyRequest
 	pub fn invoice_parameters_generated(
 		&self, counterparty_node_id: PublicKey, request_id: RequestId, scid: u64,
 		cltv_expiry_delta: u32, client_trusts_lsp: bool,
@@ -649,7 +696,19 @@ where
 		}
 	}
 
-	pub(crate) fn htlc_intercepted(
+	/// Forward [`Event::HTLCIntercepted`] event parameters into this function.
+	///
+	/// Will fail the intercepted HTLC if the scid matches a payment we are expecting
+	/// but the payment amount is incorrect or the expiry has passed.
+	///
+	/// Will generate a [`LSPS2Event::OpenChannel`] event if the scid matches a payment we are expected
+	/// and the payment amount is correct and the offer has not expired.
+	///
+	/// Will do nothing if the scid does not match any of the ones we gave out.
+	///
+	/// [`Event::HTLCIntercepted`]: lightning::events::Event::HTLCIntercepted
+	/// [`LSPS2Event::OpenChannel`]: crate::lsps2::LSPS2Event::OpenChannel
+	pub fn htlc_intercepted(
 		&self, scid: u64, intercept_id: InterceptId, expected_outbound_amount_msat: u64,
 	) -> Result<(), APIError> {
 		let peer_by_scid = self.peer_by_scid.read().unwrap();
@@ -692,8 +751,13 @@ where
 		Ok(())
 	}
 
-	// figure out which intercept id is waiting on this channel and enqueue ForwardInterceptedHTLC event
-	pub(crate) fn channel_ready(
+	/// Forward [`Event::ChannelReady`] event parameters into this function.
+	///
+	/// Will forward the intercepted HTLC if it matches a channel
+	/// we need to forward a payment over otherwise it will be ignored.
+	///
+	/// [`Event::ChannelReady`]: lightning::events::Event::ChannelReady
+	pub fn channel_ready(
 		&self, user_channel_id: u128, channel_id: &ChannelId, counterparty_node_id: &PublicKey,
 	) -> Result<(), APIError> {
 		if let Ok(scid) = user_channel_id.try_into() {

@@ -1,3 +1,5 @@
+//! Contains LSPS1 event types
+
 use super::msgs::{ChannelInfo, OptionsSupported, Order, OrderId, Payment};
 
 use crate::lsps0::msgs::RequestId;
@@ -5,7 +7,7 @@ use crate::prelude::String;
 
 use bitcoin::secp256k1::PublicKey;
 
-/// An "Event" which you should probably take some action in response to.
+/// An event which you should probably take some action in response to.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
 	GetInfoResponse {
