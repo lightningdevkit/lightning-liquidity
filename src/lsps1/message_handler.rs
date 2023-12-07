@@ -18,7 +18,7 @@ use super::msgs::{
 use super::utils::is_valid;
 
 use crate::events::EventQueue;
-use crate::lsps0::message_handler::{CRChannelConfig, ProtocolMessageHandler};
+use crate::lsps0::message_handler::ProtocolMessageHandler;
 use crate::lsps0::msgs::{LSPSMessage, RequestId};
 use crate::prelude::{HashMap, String, ToString, Vec};
 use crate::sync::{Arc, Mutex, RwLock};
@@ -39,6 +39,13 @@ use chrono::Utc;
 use core::ops::Deref;
 
 const SUPPORTED_SPEC_VERSIONS: [u16; 1] = [1];
+
+pub struct LSPS1Config {
+	pub token: Option<String>,
+	pub max_fees: Option<u64>,
+	pub options_supported: Option<OptionsSupported>,
+	pub website: Option<String>,
+}
 
 struct ChannelStateError(String);
 
@@ -211,7 +218,7 @@ impl OutboundRequestState {
 	}
 }
 
-struct OutboundCRChannelConfig {
+struct OutboundLSPS1Config {
 	order: Order,
 	created_at: chrono::DateTime<Utc>,
 	expires_at: chrono::DateTime<Utc>,
@@ -220,7 +227,7 @@ struct OutboundCRChannelConfig {
 
 struct OutboundCRChannel {
 	state: OutboundRequestState,
-	config: OutboundCRChannelConfig,
+	config: OutboundLSPS1Config,
 }
 
 impl OutboundCRChannel {
@@ -230,7 +237,7 @@ impl OutboundCRChannel {
 	) -> Self {
 		Self {
 			state: OutboundRequestState::OrderCreated { order_id },
-			config: OutboundCRChannelConfig { order, created_at, expires_at, payment },
+			config: OutboundLSPS1Config { order, created_at, expires_at, payment },
 		}
 	}
 	pub fn create_payment_invoice(&mut self) -> Result<(), LightningError> {
@@ -303,7 +310,7 @@ where
 	ES::Target: EntropySource,
 {
 	pub(crate) fn new(
-		entropy_source: ES, config: &CRChannelConfig,
+		entropy_source: ES, config: &LSPS1Config,
 		pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
 		pending_events: Arc<EventQueue>, channel_manager: CM, chain_source: Option<C>,
 	) -> Self {

@@ -2,7 +2,7 @@
 
 #[cfg(lsps1)]
 use {
-	crate::lsps1::message_handler::LSPS1MessageHandler,
+	crate::lsps1::message_handler::{LSPS1Config, LSPS1MessageHandler},
 	crate::lsps1::msgs::{ChannelInfo, OptionsSupported, Order, OrderId, OrderState, Payment},
 };
 
@@ -59,18 +59,10 @@ pub(crate) trait ProtocolMessageHandler {
 pub struct LiquidityProviderConfig {
 	/// LSPS1 Configuration
 	#[cfg(lsps1)]
-	pub lsps1_config: Option<CRChannelConfig>,
+	pub lsps1_config: Option<LSPS1Config>,
 	/// Optional configuration for JIT channels
 	/// should you want to support them.
 	pub lsps2_config: Option<LSPS2Config>,
-}
-
-#[cfg(lsps1)]
-pub struct CRChannelConfig {
-	pub token: Option<String>,
-	pub max_fees: Option<u64>,
-	pub options_supported: Option<OptionsSupported>,
-	pub website: Option<String>,
 }
 
 /// The main interface into LSP functionality.
