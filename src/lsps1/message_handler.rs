@@ -7,7 +7,7 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
-//! Contains the main LSPS1 object, `CRManager`.
+//! Contains the main LSPS1 object, `LSPS1MessageHandler`.
 
 use super::msgs::{
 	ChannelInfo, CreateOrderRequest, CreateOrderResponse, GetInfoRequest, GetInfoResponse,
@@ -275,7 +275,7 @@ impl PeerState {
 	}
 }
 
-pub struct CRManager<ES: Deref, CM: Deref + Clone, PM: Deref + Clone, C: Deref>
+pub struct LSPS1MessageHandler<ES: Deref, CM: Deref + Clone, PM: Deref + Clone, C: Deref>
 where
 	ES::Target: EntropySource,
 	CM::Target: AChannelManager,
@@ -294,7 +294,7 @@ where
 	max_fees: Option<u64>,
 }
 
-impl<ES: Deref, CM: Deref + Clone, PM: Deref + Clone, C: Deref> CRManager<ES, CM, PM, C>
+impl<ES: Deref, CM: Deref + Clone, PM: Deref + Clone, C: Deref> LSPS1MessageHandler<ES, CM, PM, C>
 where
 	ES::Target: EntropySource,
 	CM::Target: AChannelManager,
@@ -963,7 +963,7 @@ where
 }
 
 impl<ES: Deref, CM: Deref + Clone, PM: Deref + Clone, C: Deref> ProtocolMessageHandler
-	for CRManager<ES, CM, PM, C>
+	for LSPS1MessageHandler<ES, CM, PM, C>
 where
 	ES::Target: EntropySource,
 	CM::Target: AChannelManager,

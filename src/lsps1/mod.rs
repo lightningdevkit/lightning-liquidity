@@ -8,7 +8,8 @@
 // licenses.
 
 //! Types and primitives that implement the LSPS1: Channel Request specification.
-pub(crate) mod channel_manager;
+
+pub(crate) mod message_handler;
 pub(crate) mod event;
 /// Message, request, and other primitive types used to implement LSPS2.
 pub mod msgs;

@@ -2,7 +2,7 @@
 
 #[cfg(lsps1)]
 use {
-	crate::lsps1::channel_manager::CRManager,
+	crate::lsps1::message_handler::LSPS1MessageHandler,
 	crate::lsps1::msgs::{ChannelInfo, OptionsSupported, Order, OrderId, OrderState, Payment},
 };
 
@@ -120,7 +120,7 @@ pub struct LiquidityManager<
 	request_id_to_method_map: Mutex<HashMap<String, String>>,
 	lsps0_message_handler: LSPS0MessageHandler<ES>,
 	#[cfg(lsps1)]
-	lsps1_message_handler: Option<CRManager<ES, CM, PM, C>>,
+	lsps1_message_handler: Option<LSPS1MessageHandler<ES, CM, PM, C>>,
 	lsps2_message_handler: Option<LSPS2MessageHandler<ES, CM, PM>>,
 	provider_config: Option<LiquidityProviderConfig>,
 	channel_manager: CM,
@@ -169,7 +169,7 @@ where {
 		#[cfg(lsps1)]
 		let lsps1_message_handler = provider_config.as_ref().and_then(|config| {
 			config.lsps1_config.as_ref().map(|lsps1_config| {
-				CRManager::new(
+				LSPS1MessageHandler::new(
 					entropy_source.clone(),
 					lsps1_config,
 					Arc::clone(&pending_messages),
@@ -204,7 +204,7 @@ where {
 
 	/// Returns a reference to the LSPS1 message handler.
 	#[cfg(lsps1)]
-	pub fn lsps1_message_handler(&self) -> Option<&CRManager<ES, CM, PM, C>> {
+	pub fn lsps1_message_handler(&self) -> Option<&LSPS1MessageHandler<ES, CM, PM, C>> {
 		self.lsps1_message_handler.as_ref()
 	}
 
@@ -411,7 +411,7 @@ where
 			*best_block = BestBlock::new(header.prev_blockhash, new_height)
 		}
 
-		// TODO: Call block_disconnected on all sub-modules that require it, e.g., CRManager.
+		// TODO: Call block_disconnected on all sub-modules that require it, e.g., LSPS1MessageHandler.
 		// Internally this should call transaction_unconfirmed for all transactions that were
 		// confirmed at a height <= the one we now disconnected.
 	}
@@ -429,21 +429,21 @@ where
 		&self, header: &bitcoin::BlockHeader, txdata: &chain::transaction::TransactionData,
 		height: u32,
 	) {
-		// TODO: Call transactions_confirmed on all sub-modules that require it, e.g., CRManager.
+		// TODO: Call transactions_confirmed on all sub-modules that require it, e.g., LSPS1MessageHandler.
 	}
 
 	fn transaction_unconfirmed(&self, txid: &bitcoin::Txid) {
-		// TODO: Call transaction_unconfirmed on all sub-modules that require it, e.g., CRManager.
+		// TODO: Call transaction_unconfirmed on all sub-modules that require it, e.g., LSPS1MessageHandler.
 		// Internally this should call transaction_unconfirmed for all transactions that were
 		// confirmed at a height <= the one we now unconfirmed.
 	}
 
 	fn best_block_updated(&self, header: &bitcoin::BlockHeader, height: u32) {
-		// TODO: Call best_block_updated on all sub-modules that require it, e.g., CRManager.
+		// TODO: Call best_block_updated on all sub-modules that require it, e.g., LSPS1MessageHandler.
 	}
 
 	fn get_relevant_txids(&self) -> Vec<(bitcoin::Txid, Option<bitcoin::BlockHash>)> {
-		// TODO: Collect relevant txids from all sub-modules that, e.g., CRManager.
+		// TODO: Collect relevant txids from all sub-modules that, e.g., LSPS1MessageHandler.
 		Vec::new()
 	}
 }
