@@ -43,5 +43,8 @@ pub mod lsps0;
 #[cfg(lsps1)]
 mod lsps1;
 pub mod lsps2;
+mod manager;
 mod sync;
 mod utils;
+
+pub use manager::{LiquidityManager, LiquidityProviderConfig};
