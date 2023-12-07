@@ -10,7 +10,7 @@ use crate::events::{Event, EventQueue};
 use crate::lsps0::msgs::RequestId;
 use crate::lsps0::msgs::{LSPSMessage, RawLSPSMessage, LSPS_MESSAGE_TYPE_ID};
 use crate::lsps0::protocol::LSPS0MessageHandler;
-use crate::lsps2::message_handler::LSPS2MessageHandler;
+use crate::lsps2::message_handler::{LSPS2Config, LSPS2MessageHandler};
 use crate::lsps2::msgs::{OpeningFeeParams, RawOpeningFeeParams};
 use crate::prelude::{HashMap, String, ToString, Vec};
 use crate::sync::{Arc, Mutex, RwLock};
@@ -62,19 +62,7 @@ pub struct LiquidityProviderConfig {
 	pub lsps1_config: Option<CRChannelConfig>,
 	/// Optional configuration for JIT channels
 	/// should you want to support them.
-	pub lsps2_config: Option<JITChannelsConfig>,
-}
-
-/// Configuration options for JIT channels.
-pub struct JITChannelsConfig {
-	/// Used to calculate the promise for channel parameters supplied to clients.
-	///
-	/// Note: If this changes then old promises given out will be considered invalid.
-	pub promise_secret: [u8; 32],
-	/// The minimum payment size you are willing to accept.
-	pub min_payment_size_msat: u64,
-	/// The maximum payment size you are willing to accept.
-	pub max_payment_size_msat: u64,
+	pub lsps2_config: Option<LSPS2Config>,
 }
 
 #[cfg(lsps1)]

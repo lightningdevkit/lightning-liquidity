@@ -10,7 +10,7 @@
 //! Contains the main LSPS2 object, `LSPS2MessageHandler`.
 
 use crate::events::EventQueue;
-use crate::lsps0::message_handler::{JITChannelsConfig, ProtocolMessageHandler};
+use crate::lsps0::message_handler::ProtocolMessageHandler;
 use crate::lsps0::msgs::{LSPSMessage, RequestId};
 use crate::lsps2::utils::{compute_opening_fee, is_valid_opening_fee_params};
 use crate::lsps2::LSPS2Event;
@@ -42,6 +42,18 @@ use crate::lsps2::msgs::{
 	LSPS2_GET_INFO_REQUEST_INVALID_VERSION_ERROR_CODE,
 	LSPS2_GET_INFO_REQUEST_UNRECOGNIZED_OR_STALE_TOKEN_ERROR_CODE,
 };
+
+/// Configuration options for JIT channels.
+pub struct LSPS2Config {
+	/// Used to calculate the promise for channel parameters supplied to clients.
+	///
+	/// Note: If this changes then old promises given out will be considered invalid.
+	pub promise_secret: [u8; 32],
+	/// The minimum payment size you are willing to accept.
+	pub min_payment_size_msat: u64,
+	/// The maximum payment size you are willing to accept.
+	pub max_payment_size_msat: u64,
+}
 
 const SUPPORTED_SPEC_VERSIONS: [u16; 1] = [1];
 
@@ -421,7 +433,7 @@ where
 {
 	/// Constructs a `LSPS2MessageHandler`.
 	pub(crate) fn new(
-		entropy_source: ES, config: &JITChannelsConfig,
+		entropy_source: ES, config: &LSPS2Config,
 		pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
 		pending_events: Arc<EventQueue>, channel_manager: CM,
 	) -> Self {
