@@ -21,17 +21,17 @@ pub enum LSPS2Event {
 	/// A request from a client for information about JIT Channel parameters.
 	///
 	/// You must calculate the parameters for this client and pass them to
-	/// [`JITChannelManager::opening_fee_params_generated`].
+	/// [`LSPS2MessageHandler::opening_fee_params_generated`].
 	///
 	/// If an unrecognized or stale token is provided you can use
-	/// `[JITChannelManager::invalid_token_provided`] to error the request.
+	/// `[LSPS2MessageHandler::invalid_token_provided`] to error the request.
 	///
-	/// [`JITChannelManager::opening_fee_params_generated`]: crate::lsps2::channel_manager::JITChannelManager::opening_fee_params_generated
-	/// [`JITChannelManager::invalid_token_provided`]: crate::lsps2::channel_manager::JITChannelManager::invalid_token_provided
+	/// [`LSPS2MessageHandler::opening_fee_params_generated`]: crate::lsps2::message_handler::LSPS2MessageHandler::opening_fee_params_generated
+	/// [`LSPS2MessageHandler::invalid_token_provided`]: crate::lsps2::message_handler::LSPS2MessageHandler::invalid_token_provided
 	GetInfo {
-		/// An identifier that must be passed to [`JITChannelManager::opening_fee_params_generated`].
+		/// An identifier that must be passed to [`LSPS2MessageHandler::opening_fee_params_generated`].
 		///
-		/// [`JITChannelManager::opening_fee_params_generated`]: crate::lsps2::channel_manager::JITChannelManager::opening_fee_params_generated
+		/// [`LSPS2MessageHandler::opening_fee_params_generated`]: crate::lsps2::message_handler::LSPS2MessageHandler::opening_fee_params_generated
 		request_id: RequestId,
 		/// The node id of the client making the information request.
 		counterparty_node_id: PublicKey,
@@ -42,16 +42,16 @@ pub enum LSPS2Event {
 	},
 	/// Information from the LSP about their current fee rates and channel parameters.
 	///
-	/// You must call [`JITChannelManager::opening_fee_params_selected`] with the fee parameter
+	/// You must call [`LSPS2MessageHandler::opening_fee_params_selected`] with the fee parameter
 	/// you want to use if you wish to proceed opening a channel.
 	///
-	/// [`JITChannelManager::opening_fee_params_selected`]: crate::lsps2::channel_manager::JITChannelManager::opening_fee_params_selected
+	/// [`LSPS2MessageHandler::opening_fee_params_selected`]: crate::lsps2::message_handler::LSPS2MessageHandler::opening_fee_params_selected
 	GetInfoResponse {
 		/// This is a randomly generated identifier used to track the JIT channel state.
 		/// It is not related in anyway to the eventual lightning channel id.
-		/// It needs to be passed to [`JITChannelManager::opening_fee_params_selected`].
+		/// It needs to be passed to [`LSPS2MessageHandler::opening_fee_params_selected`].
 		///
-		/// [`JITChannelManager::opening_fee_params_selected`]: crate::lsps2::channel_manager::JITChannelManager::opening_fee_params_selected
+		/// [`LSPS2MessageHandler::opening_fee_params_selected`]: crate::lsps2::message_handler::LSPS2MessageHandler::opening_fee_params_selected
 		jit_channel_id: u128,
 		/// The node id of the LSP that provided this response.
 		counterparty_node_id: PublicKey,
@@ -62,9 +62,9 @@ pub enum LSPS2Event {
 		min_payment_size_msat: u64,
 		/// The max payment size allowed when opening the channel.
 		max_payment_size_msat: u64,
-		/// The user_channel_id value passed in to [`JITChannelManager::create_invoice`].
+		/// The user_channel_id value passed in to [`LSPS2MessageHandler::create_invoice`].
 		///
-		/// [`JITChannelManager::create_invoice`]: crate::lsps2::channel_manager::JITChannelManager::create_invoice
+		/// [`LSPS2MessageHandler::create_invoice`]: crate::lsps2::message_handler::LSPS2MessageHandler::create_invoice
 		user_channel_id: u128,
 	},
 	/// A client has selected a opening fee parameter to use and would like to
@@ -74,13 +74,13 @@ pub enum LSPS2Event {
 	/// If `payment_size_msat` is [`Option::None`] then the payer cannot use MPP.
 	///
 	/// You must generate an scid and `cltv_expiry_delta` for them to use
-	/// and call [`JITChannelManager::invoice_parameters_generated`].
+	/// and call [`LSPS2MessageHandler::invoice_parameters_generated`].
 	///
-	/// [`JITChannelManager::invoice_parameters_generated`]: crate::lsps2::channel_manager::JITChannelManager::invoice_parameters_generated
+	/// [`LSPS2MessageHandler::invoice_parameters_generated`]: crate::lsps2::message_handler::LSPS2MessageHandler::invoice_parameters_generated
 	BuyRequest {
-		/// An identifier that must be passed into [`JITChannelManager::invoice_parameters_generated`].
+		/// An identifier that must be passed into [`LSPS2MessageHandler::invoice_parameters_generated`].
 		///
-		/// [`JITChannelManager::invoice_parameters_generated`]: crate::lsps2::channel_manager::JITChannelManager::invoice_parameters_generated
+		/// [`LSPS2MessageHandler::invoice_parameters_generated`]: crate::lsps2::message_handler::LSPS2MessageHandler::invoice_parameters_generated
 		request_id: RequestId,
 		/// The client node id that is making this request.
 		counterparty_node_id: PublicKey,
@@ -106,9 +106,9 @@ pub enum LSPS2Event {
 		payment_size_msat: Option<u64>,
 		/// The trust model the LSP expects.
 		client_trusts_lsp: bool,
-		/// The `user_channel_id` value passed in to [`JITChannelManager::create_invoice`].
+		/// The `user_channel_id` value passed in to [`LSPS2MessageHandler::create_invoice`].
 		///
-		/// [`JITChannelManager::create_invoice`]: crate::lsps2::channel_manager::JITChannelManager::create_invoice
+		/// [`LSPS2MessageHandler::create_invoice`]: crate::lsps2::message_handler::LSPS2MessageHandler::create_invoice
 		user_channel_id: u128,
 	},
 	/// You should open a channel using [`ChannelManager::create_channel`].

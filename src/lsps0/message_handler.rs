@@ -10,7 +10,7 @@ use crate::events::{Event, EventQueue};
 use crate::lsps0::msgs::RequestId;
 use crate::lsps0::msgs::{LSPSMessage, RawLSPSMessage, LSPS_MESSAGE_TYPE_ID};
 use crate::lsps0::protocol::LSPS0MessageHandler;
-use crate::lsps2::channel_manager::JITChannelManager;
+use crate::lsps2::message_handler::LSPS2MessageHandler;
 use crate::lsps2::msgs::{OpeningFeeParams, RawOpeningFeeParams};
 use crate::prelude::{HashMap, String, ToString, Vec};
 use crate::sync::{Arc, Mutex, RwLock};
@@ -97,8 +97,8 @@ pub struct CRChannelConfig {
 /// Users need to continually poll [`LiquidityManager::get_and_clear_pending_events`] in order to surface
 /// [`Event`]'s that likely need to be handled.
 ///
-/// If configured, users must forward the [`Event::HTLCIntercepted`] event parameters to [`JITChannelManager::htlc_intercepted`]
-/// and the [`Event::ChannelReady`] event parameters to [`JITChannelManager::channel_ready`].
+/// If configured, users must forward the [`Event::HTLCIntercepted`] event parameters to [`LSPS2MessageHandler::htlc_intercepted`]
+/// and the [`Event::ChannelReady`] event parameters to [`LSPS2MessageHandler::channel_ready`].
 ///
 /// [`PeerManager`]: lightning::ln::peer_handler::PeerManager
 /// [`MessageHandler`]: lightning::ln::peer_handler::MessageHandler
@@ -121,7 +121,7 @@ pub struct LiquidityManager<
 	lsps0_message_handler: LSPS0MessageHandler<ES>,
 	#[cfg(lsps1)]
 	lsps1_message_handler: Option<CRManager<ES, CM, PM, C>>,
-	lsps2_message_handler: Option<JITChannelManager<ES, CM, PM>>,
+	lsps2_message_handler: Option<LSPS2MessageHandler<ES, CM, PM>>,
 	provider_config: Option<LiquidityProviderConfig>,
 	channel_manager: CM,
 	chain_source: Option<C>,
@@ -156,7 +156,7 @@ where {
 
 		let lsps2_message_handler = provider_config.as_ref().and_then(|config| {
 			config.lsps2_config.as_ref().map(|config| {
-				JITChannelManager::new(
+				LSPS2MessageHandler::new(
 					entropy_source.clone(),
 					config,
 					Arc::clone(&pending_messages),
@@ -209,7 +209,7 @@ where {
 	}
 
 	/// Returns a reference to the LSPS2 message handler.
-	pub fn lsps2_message_handler(&self) -> Option<&JITChannelManager<ES, CM, PM>> {
+	pub fn lsps2_message_handler(&self) -> Option<&LSPS2MessageHandler<ES, CM, PM>> {
 		self.lsps2_message_handler.as_ref()
 	}
 

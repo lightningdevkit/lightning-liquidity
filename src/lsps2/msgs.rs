@@ -1,3 +1,5 @@
+//! Message, request, and other primitive types used to implement LSPS2.
+
 use core::convert::TryFrom;
 
 use bitcoin::hashes::hmac::{Hmac, HmacEngine};

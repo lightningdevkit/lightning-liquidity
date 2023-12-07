@@ -7,7 +7,7 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
-//! Contains the main LSPS2 object, `JITChannelManager`.
+//! Contains the main LSPS2 object, `LSPS2MessageHandler`.
 
 use crate::events::EventQueue;
 use crate::lsps0::message_handler::{JITChannelsConfig, ProtocolMessageHandler};
@@ -395,7 +395,7 @@ impl PeerState {
 }
 
 /// The main object allowing to send and receive LSPS2 messages.
-pub struct JITChannelManager<ES: Deref, CM: Deref + Clone, PM: Deref>
+pub struct LSPS2MessageHandler<ES: Deref, CM: Deref + Clone, PM: Deref>
 where
 	ES::Target: EntropySource,
 	CM::Target: AChannelManager,
@@ -413,13 +413,13 @@ where
 	max_payment_size_msat: u64,
 }
 
-impl<ES: Deref, CM: Deref + Clone, PM: Deref> JITChannelManager<ES, CM, PM>
+impl<ES: Deref, CM: Deref + Clone, PM: Deref> LSPS2MessageHandler<ES, CM, PM>
 where
 	ES::Target: EntropySource,
 	CM::Target: AChannelManager,
 	PM::Target: APeerManager,
 {
-	/// Constructs a `JITChannelManager`.
+	/// Constructs a `LSPS2MessageHandler`.
 	pub(crate) fn new(
 		entropy_source: ES, config: &JITChannelsConfig,
 		pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
@@ -1287,7 +1287,7 @@ where
 }
 
 impl<ES: Deref, CM: Deref + Clone, PM: Deref> ProtocolMessageHandler
-	for JITChannelManager<ES, CM, PM>
+	for LSPS2MessageHandler<ES, CM, PM>
 where
 	ES::Target: EntropySource,
 	CM::Target: AChannelManager,
