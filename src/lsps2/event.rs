@@ -7,10 +7,11 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
-use bitcoin::secp256k1::PublicKey;
-
 use super::msgs::OpeningFeeParams;
 use crate::lsps0::msgs::RequestId;
+use crate::prelude::{String, Vec};
+
+use bitcoin::secp256k1::PublicKey;
 
 /// An event which you should probably take some action in response to.
 #[derive(Clone, Debug, PartialEq, Eq)]

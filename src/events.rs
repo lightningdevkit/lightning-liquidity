@@ -18,25 +18,42 @@
 #[cfg(lsps1)]
 use crate::lsps1;
 use crate::lsps2;
-use std::collections::VecDeque;
-use std::sync::{Condvar, Mutex};
+use crate::prelude::{Vec, VecDeque};
+use crate::sync::Mutex;
 
-#[derive(Default)]
 pub(crate) struct EventQueue {
 	queue: Mutex<VecDeque<Event>>,
-	condvar: Condvar,
+	#[cfg(feature = "std")]
+	condvar: std::sync::Condvar,
 }
 
 impl EventQueue {
+	pub fn new() -> Self {
+		let queue = Mutex::new(VecDeque::new());
+		#[cfg(feature = "std")]
+		{
+			let condvar = std::sync::Condvar::new();
+			Self { queue, condvar }
+		}
+		#[cfg(not(feature = "std"))]
+		Self { queue }
+	}
+
 	pub fn enqueue(&self, event: Event) {
 		{
 			let mut queue = self.queue.lock().unwrap();
 			queue.push_back(event);
 		}
 
+		#[cfg(feature = "std")]
 		self.condvar.notify_one();
 	}
 
+	pub fn next_event(&self) -> Option<Event> {
+		self.queue.lock().unwrap().pop_front()
+	}
+
+	#[cfg(feature = "std")]
 	pub fn wait_next_event(&self) -> Event {
 		let mut queue =
 			self.condvar.wait_while(self.queue.lock().unwrap(), |queue| queue.is_empty()).unwrap();
