@@ -34,7 +34,7 @@ use core::ops::Deref;
 
 use crate::lsps2::msgs::{
 	BuyRequest, BuyResponse, GetInfoRequest, GetInfoResponse, GetVersionsRequest,
-	GetVersionsResponse, JitChannelScid, LSPS2Message, LSPS2Request, LSPS2Response,
+	GetVersionsResponse, JITChannelScid, LSPS2Message, LSPS2Request, LSPS2Response,
 	OpeningFeeParams, RawOpeningFeeParams, LSPS2_BUY_REQUEST_INVALID_OPENING_FEE_PARAMS_ERROR_CODE,
 	LSPS2_BUY_REQUEST_INVALID_VERSION_ERROR_CODE,
 	LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_LARGE_ERROR_CODE,
@@ -71,7 +71,7 @@ enum InboundJITChannelState {
 	MenuRequested { version: u16 },
 	PendingMenuSelection { version: u16 },
 	BuyRequested { version: u16 },
-	PendingPayment { client_trusts_lsp: bool, short_channel_id: JitChannelScid },
+	PendingPayment { client_trusts_lsp: bool, short_channel_id: JITChannelScid },
 }
 
 impl InboundJITChannelState {
@@ -122,7 +122,7 @@ impl InboundJITChannelState {
 	}
 
 	fn invoice_params_received(
-		&self, client_trusts_lsp: bool, short_channel_id: JitChannelScid,
+		&self, client_trusts_lsp: bool, short_channel_id: JITChannelScid,
 	) -> Result<Self, ChannelStateError> {
 		match self {
 			InboundJITChannelState::BuyRequested { .. } => {
@@ -181,7 +181,7 @@ impl InboundJITChannel {
 	}
 
 	fn invoice_params_received(
-		&mut self, client_trusts_lsp: bool, jit_channel_scid: JitChannelScid,
+		&mut self, client_trusts_lsp: bool, jit_channel_scid: JITChannelScid,
 	) -> Result<(), LightningError> {
 		self.state = self.state.invoice_params_received(client_trusts_lsp, jit_channel_scid)?;
 		Ok(())
