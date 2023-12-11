@@ -41,7 +41,7 @@ mod prelude {
 pub mod events;
 pub mod lsps0;
 #[cfg(lsps1)]
-mod lsps1;
+pub mod lsps1;
 pub mod lsps2;
 mod manager;
 mod sync;

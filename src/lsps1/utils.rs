@@ -1,10 +1,10 @@
-use super::msgs::{OptionsSupported, Order};
+use super::msgs::{OptionsSupported, OrderParams};
 
 pub fn check_range(min: u64, max: u64, value: u64) -> bool {
 	(value >= min) && (value <= max)
 }
 
-pub fn is_valid(order: &Order, options: &OptionsSupported) -> bool {
+pub fn is_valid(order: &OrderParams, options: &OptionsSupported) -> bool {
 	let bool = check_range(
 		options.min_initial_client_balance_sat,
 		options.max_initial_client_balance_sat,

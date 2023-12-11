@@ -4,10 +4,7 @@ use crate::lsps0::message_handler::ProtocolMessageHandler;
 use crate::lsps0::msgs::{LSPSMessage, RawLSPSMessage, LSPS_MESSAGE_TYPE_ID};
 
 #[cfg(lsps1)]
-use {
-	crate::lsps1::message_handler::{LSPS1Config, LSPS1MessageHandler},
-	crate::lsps1::msgs::{ChannelInfo, OptionsSupported, Order, OrderId, OrderState, Payment},
-};
+use crate::lsps1::message_handler::{LSPS1Config, LSPS1MessageHandler};
 
 use crate::lsps2::message_handler::{LSPS2Config, LSPS2MessageHandler};
 use crate::prelude::{HashMap, String, Vec};

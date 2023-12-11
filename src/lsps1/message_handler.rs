@@ -12,7 +12,8 @@
 use super::msgs::{
 	ChannelInfo, CreateOrderRequest, CreateOrderResponse, GetInfoRequest, GetInfoResponse,
 	GetOrderRequest, GetOrderResponse, LSPS1Message, LSPS1Request, LSPS1Response, OptionsSupported,
-	Order, OrderId, OrderState, Payment, LSPS1_CREATE_ORDER_REQUEST_INVALID_VERSION_ERROR_CODE,
+	OrderId, OrderParams, OrderPayment, OrderState,
+	LSPS1_CREATE_ORDER_REQUEST_INVALID_VERSION_ERROR_CODE,
 	LSPS1_CREATE_ORDER_REQUEST_ORDER_MISMATCH_ERROR_CODE,
 };
 use super::utils::is_valid;
@@ -40,10 +41,15 @@ use core::ops::Deref;
 
 const SUPPORTED_SPEC_VERSIONS: [u16; 1] = [1];
 
+/// Configuration options for LSPS1 channel requests.
 pub struct LSPS1Config {
+	/// A token to be send with each channel request.
 	pub token: Option<String>,
-	pub max_fees: Option<u64>,
+	/// The maximally allowed channel fees.
+	pub max_channel_fees_msat: Option<u64>,
+	/// The options supported by the LSP.
 	pub options_supported: Option<OptionsSupported>,
+	/// The LSP's website.
 	pub website: Option<String>,
 }
 
@@ -59,7 +65,7 @@ impl From<ChannelStateError> for LightningError {
 enum InboundRequestState {
 	InfoRequested,
 	OptionsSupport { version: u16, options_supported: OptionsSupported },
-	OrderRequested { version: u16, order: Order },
+	OrderRequested { version: u16, order: OrderParams },
 	PendingPayment { order_id: OrderId },
 	AwaitingConfirmation { id: u128, order_id: OrderId },
 }
@@ -90,7 +96,7 @@ impl InboundRequestState {
 		}
 	}
 
-	pub fn order_requested(&self, order: Order) -> Result<Self, ChannelStateError> {
+	fn order_requested(&self, order: OrderParams) -> Result<Self, ChannelStateError> {
 		match self {
 			InboundRequestState::OptionsSupport { version, options_supported } => {
 				if is_valid(&order, options_supported) {
@@ -109,8 +115,8 @@ impl InboundRequestState {
 		}
 	}
 
-	pub fn order_received(
-		&self, response_order: &Order, order_id: OrderId,
+	fn order_received(
+		&self, response_order: &OrderParams, order_id: OrderId,
 	) -> Result<Self, ChannelStateError> {
 		match self {
 			InboundRequestState::OrderRequested { version, order } => {
@@ -130,7 +136,7 @@ impl InboundRequestState {
 		}
 	}
 
-	pub fn pay_for_channel(&self, channel_id: u128) -> Result<Self, ChannelStateError> {
+	fn pay_for_channel(&self, channel_id: u128) -> Result<Self, ChannelStateError> {
 		match self {
 			InboundRequestState::PendingPayment { order_id } => {
 				Ok(InboundRequestState::AwaitingConfirmation {
@@ -152,11 +158,11 @@ struct InboundCRChannel {
 }
 
 impl InboundCRChannel {
-	pub fn new(id: u128) -> Self {
+	fn new(id: u128) -> Self {
 		Self { id, state: InboundRequestState::InfoRequested }
 	}
 
-	pub fn info_received(
+	fn info_received(
 		&mut self, versions: Vec<u16>, options: OptionsSupported,
 	) -> Result<u16, LightningError> {
 		self.state = self.state.info_received(versions, options)?;
@@ -170,7 +176,7 @@ impl InboundCRChannel {
 		}
 	}
 
-	pub fn order_requested(&mut self, order: Order) -> Result<u16, LightningError> {
+	fn order_requested(&mut self, order: OrderParams) -> Result<u16, LightningError> {
 		self.state = self.state.order_requested(order)?;
 
 		match self.state {
@@ -184,14 +190,14 @@ impl InboundCRChannel {
 		}
 	}
 
-	pub fn order_received(
-		&mut self, order: &Order, order_id: OrderId,
+	fn order_received(
+		&mut self, order: &OrderParams, order_id: OrderId,
 	) -> Result<(), LightningError> {
 		self.state = self.state.order_received(order, order_id)?;
 		Ok(())
 	}
 
-	pub fn pay_for_channel(&mut self, channel_id: u128) -> Result<(), LightningError> {
+	fn pay_for_channel(&mut self, channel_id: u128) -> Result<(), LightningError> {
 		self.state = self.state.pay_for_channel(channel_id)?;
 		Ok(())
 	}
@@ -205,7 +211,7 @@ enum OutboundRequestState {
 }
 
 impl OutboundRequestState {
-	pub fn create_payment_invoice(&self) -> Result<Self, ChannelStateError> {
+	fn create_payment_invoice(&self) -> Result<Self, ChannelStateError> {
 		match self {
 			OutboundRequestState::OrderCreated { order_id } => {
 				Ok(OutboundRequestState::WaitingPayment { order_id: order_id.clone() })
@@ -219,10 +225,10 @@ impl OutboundRequestState {
 }
 
 struct OutboundLSPS1Config {
-	order: Order,
+	order: OrderParams,
 	created_at: chrono::DateTime<Utc>,
 	expires_at: chrono::DateTime<Utc>,
-	payment: Payment,
+	payment: OrderPayment,
 }
 
 struct OutboundCRChannel {
@@ -231,21 +237,21 @@ struct OutboundCRChannel {
 }
 
 impl OutboundCRChannel {
-	pub fn new(
-		order: Order, created_at: chrono::DateTime<Utc>, expires_at: chrono::DateTime<Utc>,
-		order_id: OrderId, payment: Payment,
+	fn new(
+		order: OrderParams, created_at: chrono::DateTime<Utc>, expires_at: chrono::DateTime<Utc>,
+		order_id: OrderId, payment: OrderPayment,
 	) -> Self {
 		Self {
 			state: OutboundRequestState::OrderCreated { order_id },
 			config: OutboundLSPS1Config { order, created_at, expires_at, payment },
 		}
 	}
-	pub fn create_payment_invoice(&mut self) -> Result<(), LightningError> {
+	fn create_payment_invoice(&mut self) -> Result<(), LightningError> {
 		self.state = self.state.create_payment_invoice()?;
 		Ok(())
 	}
 
-	pub fn check_order_validity(&self, options_supported: &OptionsSupported) -> bool {
+	fn check_order_validity(&self, options_supported: &OptionsSupported) -> bool {
 		let order = &self.config.order;
 
 		is_valid(order, options_supported)
@@ -261,27 +267,28 @@ struct PeerState {
 }
 
 impl PeerState {
-	pub fn insert_inbound_channel(&mut self, id: u128, channel: InboundCRChannel) {
+	fn insert_inbound_channel(&mut self, id: u128, channel: InboundCRChannel) {
 		self.inbound_channels_by_id.insert(id, channel);
 	}
 
-	pub fn insert_outbound_channel(&mut self, order_id: OrderId, channel: OutboundCRChannel) {
+	fn insert_outbound_channel(&mut self, order_id: OrderId, channel: OutboundCRChannel) {
 		self.outbound_channels_by_order_id.insert(order_id, channel);
 	}
 
-	pub fn insert_request(&mut self, request_id: RequestId, channel_id: u128) {
+	fn insert_request(&mut self, request_id: RequestId, channel_id: u128) {
 		self.request_to_cid.insert(request_id, channel_id);
 	}
 
-	pub fn remove_inbound_channel(&mut self, id: u128) {
+	fn remove_inbound_channel(&mut self, id: u128) {
 		self.inbound_channels_by_id.remove(&id);
 	}
 
-	pub fn remove_outbound_channel(&mut self, order_id: OrderId) {
+	fn remove_outbound_channel(&mut self, order_id: OrderId) {
 		self.outbound_channels_by_order_id.remove(&order_id);
 	}
 }
 
+/// The main object allowing to send and receive LSPS1 messages.
 pub struct LSPS1MessageHandler<ES: Deref, CM: Deref + Clone, PM: Deref + Clone, C: Deref>
 where
 	ES::Target: EntropySource,
@@ -298,7 +305,7 @@ where
 	per_peer_state: RwLock<HashMap<PublicKey, Mutex<PeerState>>>,
 	options_config: Option<OptionsSupported>,
 	website: Option<String>,
-	max_fees: Option<u64>,
+	max_channel_fees_msat: Option<u64>,
 }
 
 impl<ES: Deref, CM: Deref + Clone, PM: Deref + Clone, C: Deref> LSPS1MessageHandler<ES, CM, PM, C>
@@ -324,15 +331,25 @@ where
 			per_peer_state: RwLock::new(HashMap::new()),
 			options_config: config.options_supported.clone(),
 			website: config.website.clone(),
-			max_fees: config.max_fees,
+			max_channel_fees_msat: config.max_channel_fees_msat,
 		}
 	}
 
+	/// Set a [`PeerManager`] reference for the message handler.
+	///
+	/// This allows the message handler to wake the [`PeerManager`] by calling
+	/// [`PeerManager::process_events`] after enqueing messages to be sent.
+	///
+	/// Without this the messages will be sent based on whatever polling interval
+	/// your background processor uses.
+	///
+	/// [`PeerManager`]: lightning::ln::peer_handler::PeerManager
+	/// [`PeerManager::process_events`]: lightning::ln::peer_handler::PeerManager::process_events
 	pub fn set_peer_manager(&self, peer_manager: PM) {
 		*self.peer_manager.lock().unwrap() = Some(peer_manager);
 	}
 
-	pub fn request_for_info(&self, counterparty_node_id: PublicKey, channel_id: u128) {
+	fn request_for_info(&self, counterparty_node_id: PublicKey, channel_id: u128) {
 		let channel = InboundCRChannel::new(channel_id);
 
 		let mut outer_state_lock = self.per_peer_state.write().unwrap();
@@ -439,8 +456,8 @@ where
 		Ok(())
 	}
 
-	pub fn place_order(
-		&self, channel_id: u128, counterparty_node_id: &PublicKey, order: Order,
+	fn place_order(
+		&self, channel_id: u128, counterparty_node_id: &PublicKey, order: OrderParams,
 	) -> Result<(), APIError> {
 		let outer_state_lock = self.per_peer_state.write().unwrap();
 
@@ -548,8 +565,8 @@ where
 		Ok(())
 	}
 
-	pub fn send_invoice_for_order(
-		&self, request_id: RequestId, counterparty_node_id: &PublicKey, payment: Payment,
+	fn send_invoice_for_order(
+		&self, request_id: RequestId, counterparty_node_id: &PublicKey, payment: OrderPayment,
 		created_at: chrono::DateTime<Utc>, expires_at: chrono::DateTime<Utc>,
 	) -> Result<(), APIError> {
 		let outer_state_lock = self.per_peer_state.read().unwrap();
@@ -643,9 +660,11 @@ where
 				}
 
 				let total_fees = response.payment.fee_total_sat + response.order.client_balance_sat;
-				let max_fees = self.max_fees.unwrap_or(u64::MAX);
+				let max_channel_fees_msat = self.max_channel_fees_msat.unwrap_or(u64::MAX);
 
-				if total_fees == response.payment.order_total_sat && total_fees < max_fees {
+				if total_fees == response.payment.order_total_sat
+					&& total_fees < max_channel_fees_msat
+				{
 					self.enqueue_event(Event::LSPS1(super::event::Event::DisplayOrder {
 						id: channel_id,
 						counterparty_node_id: *counterparty_node_id,
@@ -710,7 +729,7 @@ where
 		}
 	}
 
-	pub fn check_order_status(
+	fn check_order_status(
 		&self, counterparty_node_id: &PublicKey, order_id: OrderId, channel_id: u128,
 	) -> Result<(), APIError> {
 		let outer_state_lock = self.per_peer_state.write().unwrap();
@@ -811,7 +830,7 @@ where
 		Ok(())
 	}
 
-	pub fn update_order_status(
+	fn update_order_status(
 		&self, request_id: RequestId, counterparty_node_id: PublicKey, order_id: OrderId,
 		order_state: OrderState, channel: Option<ChannelInfo>,
 	) -> Result<(), APIError> {
