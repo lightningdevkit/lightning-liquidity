@@ -35,6 +35,8 @@ jobs:
         run: |
           cargo doc --release
           cargo doc --no-default-features --features no-std
+          RUSTFLAGS="--cfg lsps1" cargo doc --release
+          RUSTFLAGS="--cfg lsps1" cargo doc --no-default-features --features no-std
       - name: Build on Rust ${{ matrix.toolchain }}
         run: cargo build --verbose --color always
       - name: Check formatting
