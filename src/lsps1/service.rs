@@ -263,7 +263,7 @@ where
 			.pending_requests
 			.insert(request_id.clone(), LSPS1Request::CreateOrder(params.clone()));
 
-		self.enqueue_event(Event::LSPS1Service(LSPS1ServiceEvent::CreateInvoice {
+		self.pending_events.enqueue(Event::LSPS1Service(LSPS1ServiceEvent::CreateInvoice {
 			request_id,
 			counterparty_node_id: *counterparty_node_id,
 			order: params.order,
@@ -351,7 +351,7 @@ where
 
 				if let Err(e) = outbound_channel.create_payment_invoice() {
 					peer_state_lock.outbound_channels_by_order_id.remove(&params.order_id);
-					self.enqueue_event(Event::LSPS1Service(LSPS1ServiceEvent::Refund {
+					self.pending_events.enqueue(Event::LSPS1Service(LSPS1ServiceEvent::Refund {
 						request_id,
 						counterparty_node_id: *counterparty_node_id,
 						order_id: params.order_id,
@@ -363,7 +363,7 @@ where
 					.pending_requests
 					.insert(request_id.clone(), LSPS1Request::GetOrder(params.clone()));
 
-				self.enqueue_event(Event::LSPS1Service(
+				self.pending_events.enqueue(Event::LSPS1Service(
 					LSPS1ServiceEvent::CheckPaymentConfirmation {
 						request_id,
 						counterparty_node_id: *counterparty_node_id,
@@ -439,15 +439,6 @@ where
 		if let Some(peer_manager) = self.peer_manager.lock().unwrap().as_ref() {
 			peer_manager.as_ref().process_events();
 		}
-	}
-
-	fn enqueue_event(&self, event: Event) {
-		self.pending_events.enqueue(event);
-	}
-
-	fn generate_request_id(&self) -> RequestId {
-		let bytes = self.entropy_source.get_secure_random_bytes();
-		RequestId(utils::hex_str(&bytes[0..16]))
 	}
 
 	fn generate_order_id(&self) -> OrderId {

@@ -284,7 +284,7 @@ where
 		let mut peer_state_lock = inner_state_lock.lock().unwrap();
 		peer_state_lock.insert_inbound_channel(channel_id, channel);
 
-		let request_id = self.generate_request_id();
+		let request_id = crate::utils::generate_request_id(&self.entropy_source);
 		peer_state_lock.insert_request(request_id.clone(), channel_id);
 
 		{
@@ -339,7 +339,7 @@ where
 					}
 				};
 
-				self.enqueue_event(Event::LSPS1Client(LSPS1ClientEvent::GetInfoResponse {
+				self.pending_events.enqueue(Event::LSPS1Client(LSPS1ClientEvent::GetInfoResponse {
 					id: channel_id,
 					request_id,
 					counterparty_node_id: *counterparty_node_id,
@@ -385,7 +385,7 @@ where
 					}
 				};
 
-				let request_id = self.generate_request_id();
+				let request_id = crate::utils::generate_request_id(&self.entropy_source);
 				peer_state_lock.insert_request(request_id.clone(), channel_id);
 
 				{
@@ -454,13 +454,15 @@ where
 				if total_fees == response.payment.order_total_sat
 					&& total_fees < max_channel_fees_msat
 				{
-					self.enqueue_event(Event::LSPS1Client(LSPS1ClientEvent::DisplayOrder {
-						id: channel_id,
-						counterparty_node_id: *counterparty_node_id,
-						order: response.order,
-						payment: response.payment,
-						channel: response.channel,
-					}));
+					self.pending_events.enqueue(Event::LSPS1Client(
+						LSPS1ClientEvent::DisplayOrder {
+							id: channel_id,
+							counterparty_node_id: *counterparty_node_id,
+							order: response.order,
+							payment: response.payment,
+							channel: response.channel,
+						},
+					));
 				} else {
 					peer_state_lock.remove_inbound_channel(channel_id);
 					return Err(LightningError {
@@ -534,7 +536,7 @@ where
 						return Err(APIError::APIMisuseError { err: e.err });
 					}
 
-					let request_id = self.generate_request_id();
+					let request_id = crate::utils::generate_request_id(&self.entropy_source);
 					peer_state_lock.insert_request(request_id.clone(), channel_id);
 
 					{
@@ -644,27 +646,6 @@ where
 				return Err(LightningError { err: format!("Received get_order response for a create order request from an unknown counterparty ({:?})",counterparty_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
 			}
 		}
-	}
-
-	fn enqueue_event(&self, event: Event) {
-		self.pending_events.enqueue(event);
-	}
-
-	fn generate_channel_id(&self) -> u128 {
-		let bytes = self.entropy_source.get_secure_random_bytes();
-		let mut id_bytes: [u8; 16] = [0; 16];
-		id_bytes.copy_from_slice(&bytes[0..16]);
-		u128::from_be_bytes(id_bytes)
-	}
-
-	fn generate_request_id(&self) -> RequestId {
-		let bytes = self.entropy_source.get_secure_random_bytes();
-		RequestId(utils::hex_str(&bytes[0..16]))
-	}
-
-	fn generate_order_id(&self) -> OrderId {
-		let bytes = self.entropy_source.get_secure_random_bytes();
-		OrderId(utils::hex_str(&bytes[0..16]))
 	}
 }
 

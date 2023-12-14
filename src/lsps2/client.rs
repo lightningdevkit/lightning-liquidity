@@ -277,7 +277,7 @@ where
 		let mut peer_state_lock = inner_state_lock.lock().unwrap();
 		peer_state_lock.insert_inbound_channel(jit_channel_id, channel);
 
-		let request_id = self.generate_request_id();
+		let request_id = crate::utils::generate_request_id(&self.entropy_source);
 		peer_state_lock.insert_request(request_id.clone(), jit_channel_id);
 
 		{
@@ -320,7 +320,7 @@ where
 						}
 					};
 
-					let request_id = self.generate_request_id();
+					let request_id = crate::utils::generate_request_id(&self.entropy_source);
 					let payment_size_msat = jit_channel.config.payment_size_msat;
 					peer_state.insert_request(request_id.clone(), jit_channel_id);
 
@@ -365,15 +365,6 @@ where
 		u128::from_be_bytes(id_bytes)
 	}
 
-	fn generate_request_id(&self) -> RequestId {
-		let bytes = self.entropy_source.get_secure_random_bytes();
-		RequestId(utils::hex_str(&bytes[0..16]))
-	}
-
-	fn enqueue_event(&self, event: Event) {
-		self.pending_events.enqueue(event);
-	}
-
 	fn handle_get_versions_response(
 		&self, request_id: RequestId, counterparty_node_id: &PublicKey, result: GetVersionsResponse,
 	) -> Result<(), LightningError> {
@@ -412,7 +403,7 @@ where
 					}
 				};
 
-				let request_id = self.generate_request_id();
+				let request_id = crate::utils::generate_request_id(&self.entropy_source);
 				peer_state.insert_request(request_id.clone(), jit_channel_id);
 
 				{
@@ -478,14 +469,16 @@ where
 					return Err(e);
 				}
 
-				self.enqueue_event(Event::LSPS2Client(LSPS2ClientEvent::GetInfoResponse {
-					counterparty_node_id: *counterparty_node_id,
-					opening_fee_params_menu: result.opening_fee_params_menu,
-					min_payment_size_msat: result.min_payment_size_msat,
-					max_payment_size_msat: result.max_payment_size_msat,
-					jit_channel_id,
-					user_channel_id: jit_channel.config.user_id,
-				}));
+				self.pending_events.enqueue(Event::LSPS2Client(
+					LSPS2ClientEvent::GetInfoResponse {
+						counterparty_node_id: *counterparty_node_id,
+						opening_fee_params_menu: result.opening_fee_params_menu,
+						min_payment_size_msat: result.min_payment_size_msat,
+						max_payment_size_msat: result.max_payment_size_msat,
+						jit_channel_id,
+						user_channel_id: jit_channel.config.user_id,
+					},
+				));
 			}
 			None => {
 				return Err(LightningError {
@@ -572,7 +565,7 @@ where
 				}
 
 				if let Ok(scid) = result.jit_channel_scid.to_scid() {
-					self.enqueue_event(Event::LSPS2Client(
+					self.pending_events.enqueue(Event::LSPS2Client(
 						LSPS2ClientEvent::InvoiceGenerationReady {
 							counterparty_node_id: *counterparty_node_id,
 							scid,
