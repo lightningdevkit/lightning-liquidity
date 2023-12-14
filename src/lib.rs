@@ -47,4 +47,4 @@ mod manager;
 mod sync;
 mod utils;
 
-pub use manager::{LiquidityManager, LiquidityProviderConfig};
+pub use manager::{LiquidityClientConfig, LiquidityManager, LiquidityServiceConfig};

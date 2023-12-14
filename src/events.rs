@@ -78,11 +78,14 @@ impl EventQueue {
 /// An event which you should probably take some action in response to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
+	/// An LSPS1 (Channel Request) client event.
+	#[cfg(lsps1)]
+	LSPS1Client(lsps1::event::LSPS1ClientEvent),
+	/// An LSPS1 (Channel Request) server event.
+	#[cfg(lsps1)]
+	LSPS1Service(lsps1::event::LSPS1ServiceEvent),
 	/// An LSPS2 (JIT Channel) client event.
 	LSPS2Client(lsps2::event::LSPS2ClientEvent),
 	/// An LSPS2 (JIT Channel) server event.
 	LSPS2Service(lsps2::event::LSPS2ServiceEvent),
-	/// An LSPS1 protocol event.
-	#[cfg(lsps1)]
-	LSPS1(lsps1::event::Event),
 }

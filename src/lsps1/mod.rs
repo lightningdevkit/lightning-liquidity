@@ -9,7 +9,8 @@
 
 //! Types and primitives that implement the LSPS1: Channel Request specification.
 
+pub mod client;
 pub mod event;
-pub mod message_handler;
 pub mod msgs;
+pub mod service;
 pub(crate) mod utils;

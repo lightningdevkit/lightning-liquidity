@@ -7,9 +7,9 @@ use crate::prelude::String;
 
 use bitcoin::secp256k1::PublicKey;
 
-/// An event which you should probably take some action in response to.
+/// An event which an LSPS1 client should take some action in response to.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Event {
+pub enum LSPS1ClientEvent {
 	/// TODO
 	GetInfoResponse {
 		/// TODO
@@ -26,15 +26,6 @@ pub enum Event {
 		options_supported: OptionsSupported,
 	},
 	/// TODO
-	CreateInvoice {
-		/// TODO
-		request_id: RequestId,
-		/// TODO
-		counterparty_node_id: PublicKey,
-		/// TODO
-		order: OrderParams,
-	},
-	/// TODO
 	DisplayOrder {
 		/// TODO
 		id: u128,
@@ -47,30 +38,22 @@ pub enum Event {
 		/// TODO
 		channel: Option<ChannelInfo>,
 	},
+}
+
+/// An event which an LSPS1 server should take some action in response to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LSPS1ServiceEvent {
 	/// TODO
-	PayforChannel {
+	CreateInvoice {
 		/// TODO
 		request_id: RequestId,
 		/// TODO
 		counterparty_node_id: PublicKey,
 		/// TODO
 		order: OrderParams,
-		/// TODO
-		payment: OrderPayment,
-		/// TODO
-		channel: Option<ChannelInfo>,
 	},
 	/// TODO
 	CheckPaymentConfirmation {
-		/// TODO
-		request_id: RequestId,
-		/// TODO
-		counterparty_node_id: PublicKey,
-		/// TODO
-		order_id: OrderId,
-	},
-	/// TODO
-	OpenChannel {
 		/// TODO
 		request_id: RequestId,
 		/// TODO

@@ -4,7 +4,11 @@ use crate::lsps0::message_handler::ProtocolMessageHandler;
 use crate::lsps0::msgs::{LSPSMessage, RawLSPSMessage, LSPS_MESSAGE_TYPE_ID};
 
 #[cfg(lsps1)]
-use crate::lsps1::message_handler::{LSPS1Config, LSPS1MessageHandler};
+use crate::lsps1::client::{LSPS1ClientConfig, LSPS1ClientHandler};
+#[cfg(lsps1)]
+use crate::lsps1::msgs::LSPS1Message;
+#[cfg(lsps1)]
+use crate::lsps1::service::{LSPS1ServiceConfig, LSPS1ServiceHandler};
 
 use crate::lsps2::client::{LSPS2ClientConfig, LSPS2ClientHandler};
 use crate::lsps2::msgs::LSPS2Message;
@@ -22,26 +26,34 @@ use lightning::sign::EntropySource;
 use lightning::util::logger::Level;
 use lightning::util::ser::Readable;
 
-use bitcoin::blockdata::constants::genesis_block;
 use bitcoin::secp256k1::PublicKey;
-use bitcoin::BlockHash;
 
 use core::ops::Deref;
 const LSPS_FEATURE_BIT: usize = 729;
 
-/// A configuration for [`LiquidityManager`].
+/// A server-side configuration for [`LiquidityManager`].
 ///
-/// Allows end-user to configure options when using the [`LiquidityManager`]
+/// Allows end-users to configure options when using the [`LiquidityManager`]
 /// to provide liquidity services to clients.
-pub struct LiquidityProviderConfig {
-	/// LSPS1 Configuration
+pub struct LiquidityServiceConfig {
+	/// Optional server-side configuration for LSPS1 channel requests.
 	#[cfg(lsps1)]
-	pub lsps1_config: Option<LSPS1Config>,
-	/// Optional client-side configuration for JIT channels.
-	pub lsps2_client_config: Option<LSPS2ClientConfig>,
+	pub lsps1_service_config: Option<LSPS1ServiceConfig>,
 	/// Optional server-side configuration for JIT channels
 	/// should you want to support them.
 	pub lsps2_service_config: Option<LSPS2ServiceConfig>,
+}
+
+/// A client-side configuration for [`LiquidityManager`].
+///
+/// Allows end-user to configure options when using the [`LiquidityManager`]
+/// to access liquidity services from a provider.
+pub struct LiquidityClientConfig {
+	/// Optional client-side configuration for LSPS1 channel requests.
+	#[cfg(lsps1)]
+	pub lsps1_client_config: Option<LSPS1ClientConfig>,
+	/// Optional client-side configuration for JIT channels.
+	pub lsps2_client_config: Option<LSPS2ClientConfig>,
 }
 
 /// The main interface into LSP functionality.
@@ -79,14 +91,15 @@ pub struct LiquidityManager<
 	request_id_to_method_map: Mutex<HashMap<String, String>>,
 	lsps0_message_handler: LSPS0MessageHandler<ES>,
 	#[cfg(lsps1)]
-	lsps1_message_handler: Option<LSPS1MessageHandler<ES, CM, PM, C>>,
+	lsps1_service_handler: Option<LSPS1ServiceHandler<ES, CM, PM, C>>,
+	#[cfg(lsps1)]
+	lsps1_client_handler: Option<LSPS1ClientHandler<ES, CM, PM, C>>,
 	lsps2_service_handler: Option<LSPS2ServiceHandler<CM, PM>>,
 	lsps2_client_handler: Option<LSPS2ClientHandler<ES, PM>>,
-	provider_config: Option<LiquidityProviderConfig>,
-	channel_manager: CM,
-	chain_source: Option<C>,
-	genesis_hash: Option<BlockHash>,
+	service_config: Option<LiquidityServiceConfig>,
+	_client_config: Option<LiquidityClientConfig>,
 	best_block: Option<RwLock<BestBlock>>,
+	_chain_source: Option<C>,
 }
 
 impl<ES: Deref + Clone, CM: Deref + Clone, PM: Deref + Clone, C: Deref + Clone>
@@ -99,10 +112,12 @@ where
 {
 	/// Constructor for the [`LiquidityManager`].
 	///
-	/// Sets up the required protocol message handlers based on the given [`LiquidityProviderConfig`].
+	/// Sets up the required protocol message handlers based on the given
+	/// [`LiquidityClientConfig`] and [`LiquidityServiceConfig`].
 	pub fn new(
-		entropy_source: ES, provider_config: Option<LiquidityProviderConfig>, channel_manager: CM,
-		chain_source: Option<C>, chain_params: Option<ChainParameters>,
+		entropy_source: ES, channel_manager: CM, chain_source: Option<C>,
+		chain_params: Option<ChainParameters>, service_config: Option<LiquidityServiceConfig>,
+		client_config: Option<LiquidityClientConfig>,
 	) -> Self
 where {
 		let pending_messages = Arc::new(Mutex::new(vec![]));
@@ -114,7 +129,7 @@ where {
 			Arc::clone(&pending_messages),
 		);
 
-		let lsps2_client_handler = provider_config.as_ref().and_then(|config| {
+		let lsps2_client_handler = client_config.as_ref().and_then(|config| {
 			config.lsps2_client_config.map(|config| {
 				LSPS2ClientHandler::new(
 					entropy_source.clone(),
@@ -124,7 +139,7 @@ where {
 				)
 			})
 		});
-		let lsps2_service_handler = provider_config.as_ref().and_then(|config| {
+		let lsps2_service_handler = service_config.as_ref().and_then(|config| {
 			config.lsps2_service_config.as_ref().map(|config| {
 				LSPS2ServiceHandler::new(
 					Arc::clone(&pending_messages),
@@ -136,15 +151,29 @@ where {
 		});
 
 		#[cfg(lsps1)]
-		let lsps1_message_handler = provider_config.as_ref().and_then(|config| {
-			config.lsps1_config.as_ref().map(|lsps1_config| {
-				LSPS1MessageHandler::new(
+		let lsps1_client_handler = client_config.as_ref().and_then(|config| {
+			config.lsps1_client_config.as_ref().map(|config| {
+				LSPS1ClientHandler::new(
 					entropy_source.clone(),
-					lsps1_config,
 					Arc::clone(&pending_messages),
 					Arc::clone(&pending_events),
 					channel_manager.clone(),
 					chain_source.clone(),
+					config.clone(),
+				)
+			})
+		});
+
+		#[cfg(lsps1)]
+		let lsps1_service_handler = service_config.as_ref().and_then(|config| {
+			config.lsps1_service_config.as_ref().map(|config| {
+				LSPS1ServiceHandler::new(
+					entropy_source.clone(),
+					Arc::clone(&pending_messages),
+					Arc::clone(&pending_events),
+					channel_manager.clone(),
+					chain_source.clone(),
+					config.clone(),
 				)
 			})
 		});
@@ -155,15 +184,15 @@ where {
 			request_id_to_method_map: Mutex::new(HashMap::new()),
 			lsps0_message_handler,
 			#[cfg(lsps1)]
-			lsps1_message_handler,
+			lsps1_client_handler,
+			#[cfg(lsps1)]
+			lsps1_service_handler,
 			lsps2_client_handler,
 			lsps2_service_handler,
-			provider_config,
-			channel_manager,
-			chain_source,
-			genesis_hash: chain_params
-				.map(|chain_params| genesis_block(chain_params.network).header.block_hash()),
+			service_config,
+			_client_config: client_config,
 			best_block: chain_params.map(|chain_params| RwLock::new(chain_params.best_block)),
+			_chain_source: chain_source,
 		}
 	}
 
@@ -172,10 +201,16 @@ where {
 		&self.lsps0_message_handler
 	}
 
-	/// Returns a reference to the LSPS1 message handler.
+	/// Returns a reference to the LSPS1 client-side handler.
 	#[cfg(lsps1)]
-	pub fn lsps1_message_handler(&self) -> Option<&LSPS1MessageHandler<ES, CM, PM, C>> {
-		self.lsps1_message_handler.as_ref()
+	pub fn lsps1_client_handler(&self) -> Option<&LSPS1ClientHandler<ES, CM, PM, C>> {
+		self.lsps1_client_handler.as_ref()
+	}
+
+	/// Returns a reference to the LSPS1 server-side handler.
+	#[cfg(lsps1)]
+	pub fn lsps1_service_handler(&self) -> Option<&LSPS1ServiceHandler<ES, CM, PM, C>> {
+		self.lsps1_service_handler.as_ref()
 	}
 
 	/// Returns a reference to the LSPS2 client-side handler.
@@ -222,8 +257,12 @@ where {
 	/// [`PeerManager::process_events`]: lightning::ln::peer_handler::PeerManager::process_events
 	pub fn set_peer_manager(&self, peer_manager: PM) {
 		#[cfg(lsps1)]
-		if let Some(lsps1_message_handler) = &self.lsps1_message_handler {
-			lsps1_message_handler.set_peer_manager(peer_manager.clone());
+		if let Some(lsps1_client_handler) = &self.lsps1_client_handler {
+			lsps1_client_handler.set_peer_manager(peer_manager.clone());
+		}
+		#[cfg(lsps1)]
+		if let Some(lsps1_service_handler) = &self.lsps1_service_handler {
+			lsps1_service_handler.set_peer_manager(peer_manager.clone());
 		}
 		if let Some(lsps2_client_handler) = &self.lsps2_client_handler {
 			lsps2_client_handler.set_peer_manager(peer_manager.clone());
@@ -244,12 +283,21 @@ where {
 				self.lsps0_message_handler.handle_message(msg, sender_node_id)?;
 			}
 			#[cfg(lsps1)]
-			LSPSMessage::LSPS1(msg) => match &self.lsps1_message_handler {
-				Some(lsps1_message_handler) => {
-					lsps1_message_handler.handle_message(msg, sender_node_id)?;
+			LSPSMessage::LSPS1(msg @ LSPS1Message::Response(..)) => match &self.lsps1_client_handler {
+				Some(lsps1_client_handler) => {
+					lsps1_client_handler.handle_message(msg, sender_node_id)?;
 				}
 				None => {
-					return Err(LightningError { err: format!("Received LSPS1 message without LSPS1 message handler configured. From node = {:?}", sender_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
+					return Err(LightningError { err: format!("Received LSPS1 response message without LSPS1 client handler configured. From node = {:?}", sender_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
+				}
+			},
+			#[cfg(lsps1)]
+			LSPSMessage::LSPS1(msg @ LSPS1Message::Request(..)) => match &self.lsps1_service_handler {
+				Some(lsps1_service_handler) => {
+					lsps1_service_handler.handle_message(msg, sender_node_id)?;
+				}
+				None => {
+					return Err(LightningError { err: format!("Received LSPS1 request message without LSPS1 service handler configured. From node = {:?}", sender_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
 				}
 			},
 			LSPSMessage::LSPS2(msg @ LSPS2Message::Response(..)) => {
@@ -348,7 +396,7 @@ where
 	fn provided_node_features(&self) -> NodeFeatures {
 		let mut features = NodeFeatures::empty();
 
-		if self.provider_config.is_some() {
+		if self.service_config.is_some() {
 			features.set_optional_custom_bit(LSPS_FEATURE_BIT).unwrap();
 		}
 
@@ -358,7 +406,7 @@ where
 	fn provided_init_features(&self, _their_node_id: &PublicKey) -> InitFeatures {
 		let mut features = InitFeatures::empty();
 
-		if self.provider_config.is_some() {
+		if self.service_config.is_some() {
 			features.set_optional_custom_bit(LSPS_FEATURE_BIT).unwrap();
 		}
 
