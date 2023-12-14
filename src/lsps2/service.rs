@@ -7,23 +7,21 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
-//! Contains the main LSPS2 object, `LSPS2MessageHandler`.
+//! Contains the main LSPS2 server-side object, [`LSPS2ServiceHandler`].
 
 use crate::events::EventQueue;
 use crate::lsps0::message_handler::ProtocolMessageHandler;
 use crate::lsps0::msgs::{LSPSMessage, RequestId};
-use crate::lsps2::event::LSPS2Event;
+use crate::lsps2::event::LSPS2ServiceEvent;
 use crate::lsps2::utils::{compute_opening_fee, is_valid_opening_fee_params};
 use crate::prelude::{HashMap, String, ToString, Vec};
 use crate::sync::{Arc, Mutex, RwLock};
-use crate::utils;
 use crate::{events::Event, lsps0::msgs::ResponseError};
 
 use lightning::ln::channelmanager::{AChannelManager, InterceptId};
 use lightning::ln::msgs::{ErrorAction, LightningError};
 use lightning::ln::peer_handler::APeerManager;
 use lightning::ln::ChannelId;
-use lightning::sign::EntropySource;
 use lightning::util::errors::APIError;
 use lightning::util::logger::Level;
 
@@ -33,9 +31,9 @@ use core::convert::TryInto;
 use core::ops::Deref;
 
 use crate::lsps2::msgs::{
-	BuyRequest, BuyResponse, GetInfoRequest, GetInfoResponse, GetVersionsRequest,
-	GetVersionsResponse, JITChannelScid, LSPS2Message, LSPS2Request, LSPS2Response,
-	OpeningFeeParams, RawOpeningFeeParams, LSPS2_BUY_REQUEST_INVALID_OPENING_FEE_PARAMS_ERROR_CODE,
+	BuyRequest, BuyResponse, GetInfoRequest, GetInfoResponse, GetVersionsResponse, LSPS2Message,
+	LSPS2Request, LSPS2Response, OpeningFeeParams, RawOpeningFeeParams,
+	LSPS2_BUY_REQUEST_INVALID_OPENING_FEE_PARAMS_ERROR_CODE,
 	LSPS2_BUY_REQUEST_INVALID_VERSION_ERROR_CODE,
 	LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_LARGE_ERROR_CODE,
 	LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_SMALL_ERROR_CODE,
@@ -43,8 +41,9 @@ use crate::lsps2::msgs::{
 	LSPS2_GET_INFO_REQUEST_UNRECOGNIZED_OR_STALE_TOKEN_ERROR_CODE,
 };
 
-/// Configuration options for JIT channels.
-pub struct LSPS2Config {
+/// Server-side configuration options for JIT channels.
+#[derive(Clone, Debug)]
+pub struct LSPS2ServiceConfig {
 	/// Used to calculate the promise for channel parameters supplied to clients.
 	///
 	/// Note: If this changes then old promises given out will be considered invalid.
@@ -68,135 +67,6 @@ struct ChannelStateError(String);
 impl From<ChannelStateError> for LightningError {
 	fn from(value: ChannelStateError) -> Self {
 		LightningError { err: value.0, action: ErrorAction::IgnoreAndLog(Level::Info) }
-	}
-}
-
-struct InboundJITChannelConfig {
-	pub user_id: u128,
-	pub token: Option<String>,
-	pub payment_size_msat: Option<u64>,
-}
-
-#[derive(PartialEq, Debug)]
-enum InboundJITChannelState {
-	VersionsRequested,
-	MenuRequested { version: u16 },
-	PendingMenuSelection { version: u16 },
-	BuyRequested { version: u16 },
-	PendingPayment { client_trusts_lsp: bool, short_channel_id: JITChannelScid },
-}
-
-impl InboundJITChannelState {
-	fn versions_received(&self, versions: Vec<u16>) -> Result<Self, ChannelStateError> {
-		let max_shared_version = versions
-			.iter()
-			.filter(|version| SUPPORTED_SPEC_VERSIONS.contains(version))
-			.max()
-			.cloned()
-			.ok_or(ChannelStateError(format!(
-			"LSP does not support any of our specification versions.  ours = {:?}. theirs = {:?}",
-			SUPPORTED_SPEC_VERSIONS, versions
-		)))?;
-
-		match self {
-			InboundJITChannelState::VersionsRequested => {
-				Ok(InboundJITChannelState::MenuRequested { version: max_shared_version })
-			}
-			state => Err(ChannelStateError(format!(
-				"Received unexpected get_versions response. JIT Channel was in state: {:?}",
-				state
-			))),
-		}
-	}
-
-	fn info_received(&self) -> Result<Self, ChannelStateError> {
-		match self {
-			InboundJITChannelState::MenuRequested { version } => {
-				Ok(InboundJITChannelState::PendingMenuSelection { version: *version })
-			}
-			state => Err(ChannelStateError(format!(
-				"Received unexpected get_info response.  JIT Channel was in state: {:?}",
-				state
-			))),
-		}
-	}
-
-	fn opening_fee_params_selected(&self) -> Result<Self, ChannelStateError> {
-		match self {
-			InboundJITChannelState::PendingMenuSelection { version } => {
-				Ok(InboundJITChannelState::BuyRequested { version: *version })
-			}
-			state => Err(ChannelStateError(format!(
-				"Opening fee params selected when JIT Channel was in state: {:?}",
-				state
-			))),
-		}
-	}
-
-	fn invoice_params_received(
-		&self, client_trusts_lsp: bool, short_channel_id: JITChannelScid,
-	) -> Result<Self, ChannelStateError> {
-		match self {
-			InboundJITChannelState::BuyRequested { .. } => {
-				Ok(InboundJITChannelState::PendingPayment { client_trusts_lsp, short_channel_id })
-			}
-			state => Err(ChannelStateError(format!(
-				"Invoice params received when JIT Channel was in state: {:?}",
-				state
-			))),
-		}
-	}
-}
-
-struct InboundJITChannel {
-	id: u128,
-	state: InboundJITChannelState,
-	config: InboundJITChannelConfig,
-}
-
-impl InboundJITChannel {
-	fn new(id: u128, user_id: u128, payment_size_msat: Option<u64>, token: Option<String>) -> Self {
-		Self {
-			id,
-			config: InboundJITChannelConfig { user_id, payment_size_msat, token },
-			state: InboundJITChannelState::VersionsRequested,
-		}
-	}
-
-	fn versions_received(&mut self, versions: Vec<u16>) -> Result<u16, LightningError> {
-		self.state = self.state.versions_received(versions)?;
-
-		match self.state {
-			InboundJITChannelState::MenuRequested { version } => Ok(version),
-			_ => Err(LightningError {
-				action: ErrorAction::IgnoreAndLog(Level::Error),
-				err: "impossible state transition".to_string(),
-			}),
-		}
-	}
-
-	fn info_received(&mut self) -> Result<(), LightningError> {
-		self.state = self.state.info_received()?;
-		Ok(())
-	}
-
-	fn opening_fee_params_selected(&mut self) -> Result<u16, LightningError> {
-		self.state = self.state.opening_fee_params_selected()?;
-
-		match self.state {
-			InboundJITChannelState::BuyRequested { version } => Ok(version),
-			_ => Err(LightningError {
-				action: ErrorAction::IgnoreAndLog(Level::Error),
-				err: "impossible state transition".to_string(),
-			}),
-		}
-	}
-
-	fn invoice_params_received(
-		&mut self, client_trusts_lsp: bool, jit_channel_scid: JITChannelScid,
-	) -> Result<(), LightningError> {
-		self.state = self.state.invoice_params_received(client_trusts_lsp, jit_channel_scid)?;
-		Ok(())
 	}
 }
 
@@ -370,35 +240,19 @@ impl OutboundJITChannel {
 }
 
 struct PeerState {
-	inbound_channels_by_id: HashMap<u128, InboundJITChannel>,
 	outbound_channels_by_scid: HashMap<u64, OutboundJITChannel>,
-	request_to_cid: HashMap<RequestId, u128>,
 	pending_requests: HashMap<RequestId, LSPS2Request>,
 }
 
 impl PeerState {
 	fn new() -> Self {
-		let inbound_channels_by_id = HashMap::new();
 		let outbound_channels_by_scid = HashMap::new();
-		let request_to_cid = HashMap::new();
 		let pending_requests = HashMap::new();
-		Self { inbound_channels_by_id, outbound_channels_by_scid, request_to_cid, pending_requests }
-	}
-
-	fn insert_inbound_channel(&mut self, jit_channel_id: u128, channel: InboundJITChannel) {
-		self.inbound_channels_by_id.insert(jit_channel_id, channel);
+		Self { outbound_channels_by_scid, pending_requests }
 	}
 
 	fn insert_outbound_channel(&mut self, scid: u64, channel: OutboundJITChannel) {
 		self.outbound_channels_by_scid.insert(scid, channel);
-	}
-
-	fn insert_request(&mut self, request_id: RequestId, jit_channel_id: u128) {
-		self.request_to_cid.insert(request_id, jit_channel_id);
-	}
-
-	fn remove_inbound_channel(&mut self, jit_channel_id: u128) {
-		self.inbound_channels_by_id.remove(&jit_channel_id);
 	}
 
 	fn remove_outbound_channel(&mut self, scid: u64) {
@@ -407,47 +261,38 @@ impl PeerState {
 }
 
 /// The main object allowing to send and receive LSPS2 messages.
-pub struct LSPS2MessageHandler<ES: Deref, CM: Deref + Clone, PM: Deref>
+pub struct LSPS2ServiceHandler<CM: Deref + Clone, PM: Deref>
 where
-	ES::Target: EntropySource,
 	CM::Target: AChannelManager,
 	PM::Target: APeerManager,
 {
-	entropy_source: ES,
 	peer_manager: Mutex<Option<PM>>,
 	channel_manager: CM,
 	pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
 	pending_events: Arc<EventQueue>,
 	per_peer_state: RwLock<HashMap<PublicKey, Mutex<PeerState>>>,
 	peer_by_scid: RwLock<HashMap<u64, PublicKey>>,
-	promise_secret: [u8; 32],
-	min_payment_size_msat: u64,
-	max_payment_size_msat: u64,
+	config: LSPS2ServiceConfig,
 }
 
-impl<ES: Deref, CM: Deref + Clone, PM: Deref> LSPS2MessageHandler<ES, CM, PM>
+impl<CM: Deref + Clone, PM: Deref> LSPS2ServiceHandler<CM, PM>
 where
-	ES::Target: EntropySource,
 	CM::Target: AChannelManager,
 	PM::Target: APeerManager,
 {
-	/// Constructs a `LSPS2MessageHandler`.
+	/// Constructs a `LSPS2ServiceHandler`.
 	pub(crate) fn new(
-		entropy_source: ES, config: &LSPS2Config,
 		pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
-		pending_events: Arc<EventQueue>, channel_manager: CM,
+		pending_events: Arc<EventQueue>, channel_manager: CM, config: LSPS2ServiceConfig,
 	) -> Self {
 		Self {
-			entropy_source,
-			promise_secret: config.promise_secret,
-			min_payment_size_msat: config.min_payment_size_msat,
-			max_payment_size_msat: config.max_payment_size_msat,
 			pending_messages,
 			pending_events,
 			per_peer_state: RwLock::new(HashMap::new()),
 			peer_by_scid: RwLock::new(HashMap::new()),
 			peer_manager: Mutex::new(None),
 			channel_manager,
+			config,
 		}
 	}
 
@@ -465,55 +310,11 @@ where
 		*self.peer_manager.lock().unwrap() = Some(peer_manager);
 	}
 
-	/// Initiate the creation of an invoice that when paid will open a channel
-	/// with enough inbound liquidity to be able to receive the payment.
-	///
-	/// `counterparty_node_id` is the node_id of the LSP you would like to use.
-	///
-	/// If `payment_size_msat` is [`Option::Some`] then the invoice will be for a fixed amount
-	/// and MPP can be used to pay it.
-	///
-	/// If `payment_size_msat` is [`Option::None`] then the invoice can be for an arbitrary amount
-	/// but MPP can no longer be used to pay it.
-	///
-	/// `token` is an optional String that will be provided to the LSP.
-	/// It can be used by the LSP as an API key, coupon code, or some other way to identify a user.
-	pub fn create_invoice(
-		&self, counterparty_node_id: PublicKey, payment_size_msat: Option<u64>,
-		token: Option<String>, user_channel_id: u128,
-	) {
-		let jit_channel_id = self.generate_jit_channel_id();
-		let channel =
-			InboundJITChannel::new(jit_channel_id, user_channel_id, payment_size_msat, token);
-
-		let mut outer_state_lock = self.per_peer_state.write().unwrap();
-		let inner_state_lock =
-			outer_state_lock.entry(counterparty_node_id).or_insert(Mutex::new(PeerState::new()));
-		let mut peer_state_lock = inner_state_lock.lock().unwrap();
-		peer_state_lock.insert_inbound_channel(jit_channel_id, channel);
-
-		let request_id = self.generate_request_id();
-		peer_state_lock.insert_request(request_id.clone(), jit_channel_id);
-
-		{
-			let mut pending_messages = self.pending_messages.lock().unwrap();
-			pending_messages.push((
-				counterparty_node_id,
-				LSPS2Message::Request(request_id, LSPS2Request::GetVersions(GetVersionsRequest {}))
-					.into(),
-			));
-		}
-
-		if let Some(peer_manager) = self.peer_manager.lock().unwrap().as_ref() {
-			peer_manager.as_ref().process_events();
-		}
-	}
-
 	/// Used by LSP to inform a client requesting a JIT Channel the token they used is invalid.
 	///
-	/// Should be called in response to receiving a [`LSPS2Event::GetInfo`] event.
+	/// Should be called in response to receiving a [`LSPS2ServiceEvent::GetInfo`] event.
 	///
-	/// [`LSPS2Event::GetInfo`]: crate::lsps2::event::LSPS2Event::GetInfo
+	/// [`LSPS2ServiceEvent::GetInfo`]: crate::lsps2::event::LSPS2ServiceEvent::GetInfo
 	pub fn invalid_token_provided(
 		&self, counterparty_node_id: PublicKey, request_id: RequestId,
 	) -> Result<(), APIError> {
@@ -549,9 +350,9 @@ where
 
 	/// Used by LSP to provide fee parameters to a client requesting a JIT Channel.
 	///
-	/// Should be called in response to receiving a [`LSPS2Event::GetInfo`] event.
+	/// Should be called in response to receiving a [`LSPS2ServiceEvent::GetInfo`] event.
 	///
-	/// [`LSPS2Event::GetInfo`]: crate::lsps2::event::LSPS2Event::GetInfo
+	/// [`LSPS2ServiceEvent::GetInfo`]: crate::lsps2::event::LSPS2ServiceEvent::GetInfo
 	pub fn opening_fee_params_generated(
 		&self, counterparty_node_id: PublicKey, request_id: RequestId,
 		opening_fee_params_menu: Vec<RawOpeningFeeParams>,
@@ -567,10 +368,12 @@ where
 						let response = LSPS2Response::GetInfo(GetInfoResponse {
 							opening_fee_params_menu: opening_fee_params_menu
 								.into_iter()
-								.map(|param| param.into_opening_fee_params(&self.promise_secret))
+								.map(|param| {
+									param.into_opening_fee_params(&self.config.promise_secret)
+								})
 								.collect(),
-							min_payment_size_msat: self.min_payment_size_msat,
-							max_payment_size_msat: self.max_payment_size_msat,
+							min_payment_size_msat: self.config.min_payment_size_msat,
+							max_payment_size_msat: self.config.max_payment_size_msat,
 						});
 						self.enqueue_response(counterparty_node_id, request_id, response);
 						Ok(())
@@ -589,75 +392,11 @@ where
 		}
 	}
 
-	/// Used by client to confirm which channel parameters to use for the JIT Channel buy request.
-	/// The client agrees to paying an opening fee equal to
-	/// `max(min_fee_msat, proportional*(payment_size_msat/1_000_000))`.
-	///
-	/// Should be called in response to receiving a [`LSPS2Event::GetInfoResponse`] event.
-	///
-	/// [`LSPS2Event::GetInfoResponse`]: crate::lsps2::event::LSPS2Event::GetInfoResponse
-	pub fn opening_fee_params_selected(
-		&self, counterparty_node_id: PublicKey, jit_channel_id: u128,
-		opening_fee_params: OpeningFeeParams,
-	) -> Result<(), APIError> {
-		let outer_state_lock = self.per_peer_state.read().unwrap();
-		match outer_state_lock.get(&counterparty_node_id) {
-			Some(inner_state_lock) => {
-				let mut peer_state = inner_state_lock.lock().unwrap();
-				if let Some(jit_channel) =
-					peer_state.inbound_channels_by_id.get_mut(&jit_channel_id)
-				{
-					let version = match jit_channel.opening_fee_params_selected() {
-						Ok(version) => version,
-						Err(e) => {
-							peer_state.remove_inbound_channel(jit_channel_id);
-							return Err(APIError::APIMisuseError { err: e.err });
-						}
-					};
-
-					let request_id = self.generate_request_id();
-					let payment_size_msat = jit_channel.config.payment_size_msat;
-					peer_state.insert_request(request_id.clone(), jit_channel_id);
-
-					{
-						let mut pending_messages = self.pending_messages.lock().unwrap();
-						pending_messages.push((
-							counterparty_node_id,
-							LSPS2Message::Request(
-								request_id,
-								LSPS2Request::Buy(BuyRequest {
-									version,
-									opening_fee_params,
-									payment_size_msat,
-								}),
-							)
-							.into(),
-						));
-					}
-					if let Some(peer_manager) = self.peer_manager.lock().unwrap().as_ref() {
-						peer_manager.as_ref().process_events();
-					}
-				} else {
-					return Err(APIError::APIMisuseError {
-						err: format!("Channel with id {} not found", jit_channel_id),
-					});
-				}
-			}
-			None => {
-				return Err(APIError::APIMisuseError {
-					err: format!("No existing state with counterparty {}", counterparty_node_id),
-				})
-			}
-		}
-
-		Ok(())
-	}
-
 	/// Used by LSP to provide client with the scid and cltv_expiry_delta to use in their invoice.
 	///
-	/// Should be called in response to receiving a [`LSPS2Event::BuyRequest`] event.
+	/// Should be called in response to receiving a [`LSPS2ServiceEvent::BuyRequest`] event.
 	///
-	/// [`LSPS2Event::BuyRequest`]: crate::lsps2::event::LSPS2Event::BuyRequest
+	/// [`LSPS2ServiceEvent::BuyRequest`]: crate::lsps2::event::LSPS2ServiceEvent::BuyRequest
 	pub fn invoice_parameters_generated(
 		&self, counterparty_node_id: PublicKey, request_id: RequestId, scid: u64,
 		cltv_expiry_delta: u32, client_trusts_lsp: bool,
@@ -713,13 +452,13 @@ where
 	/// Will fail the intercepted HTLC if the scid matches a payment we are expecting
 	/// but the payment amount is incorrect or the expiry has passed.
 	///
-	/// Will generate a [`LSPS2Event::OpenChannel`] event if the scid matches a payment we are expected
+	/// Will generate a [`LSPS2ServiceEvent::OpenChannel`] event if the scid matches a payment we are expected
 	/// and the payment amount is correct and the offer has not expired.
 	///
 	/// Will do nothing if the scid does not match any of the ones we gave out.
 	///
 	/// [`Event::HTLCIntercepted`]: lightning::events::Event::HTLCIntercepted
-	/// [`LSPS2Event::OpenChannel`]: crate::lsps2::event::LSPS2Event::OpenChannel
+	/// [`LSPS2ServiceEvent::OpenChannel`]: crate::lsps2::event::LSPS2ServiceEvent::OpenChannel
 	pub fn htlc_intercepted(
 		&self, scid: u64, intercept_id: InterceptId, expected_outbound_amount_msat: u64,
 	) -> Result<(), APIError> {
@@ -733,12 +472,14 @@ where
 						let htlc = InterceptedHTLC { intercept_id, expected_outbound_amount_msat };
 						match jit_channel.htlc_intercepted(htlc) {
 							Ok(Some((opening_fee_msat, amt_to_forward_msat))) => {
-								self.enqueue_event(Event::LSPS2(LSPS2Event::OpenChannel {
-									their_network_key: counterparty_node_id.clone(),
-									amt_to_forward_msat,
-									opening_fee_msat,
-									user_channel_id: scid as u128,
-								}));
+								self.enqueue_event(Event::LSPS2Service(
+									LSPS2ServiceEvent::OpenChannel {
+										their_network_key: counterparty_node_id.clone(),
+										amt_to_forward_msat,
+										opening_fee_msat,
+										user_channel_id: scid as u128,
+									},
+								));
 							}
 							Ok(None) => {}
 							Err(e) => {
@@ -825,18 +566,6 @@ where
 		Ok(())
 	}
 
-	fn generate_jit_channel_id(&self) -> u128 {
-		let bytes = self.entropy_source.get_secure_random_bytes();
-		let mut id_bytes: [u8; 16] = [0; 16];
-		id_bytes.copy_from_slice(&bytes[0..16]);
-		u128::from_be_bytes(id_bytes)
-	}
-
-	fn generate_request_id(&self) -> RequestId {
-		let bytes = self.entropy_source.get_secure_random_bytes();
-		RequestId(utils::hex_str(&bytes[0..16]))
-	}
-
 	fn enqueue_response(
 		&self, counterparty_node_id: PublicKey, request_id: RequestId, response: LSPS2Response,
 	) {
@@ -868,77 +597,6 @@ where
 		Ok(())
 	}
 
-	fn handle_get_versions_response(
-		&self, request_id: RequestId, counterparty_node_id: &PublicKey, result: GetVersionsResponse,
-	) -> Result<(), LightningError> {
-		let outer_state_lock = self.per_peer_state.read().unwrap();
-		match outer_state_lock.get(counterparty_node_id) {
-			Some(inner_state_lock) => {
-				let mut peer_state = inner_state_lock.lock().unwrap();
-
-				let jit_channel_id =
-					peer_state.request_to_cid.remove(&request_id).ok_or(LightningError {
-						err: format!(
-							"Received get_versions response for an unknown request: {:?}",
-							request_id
-						),
-						action: ErrorAction::IgnoreAndLog(Level::Info),
-					})?;
-
-				let jit_channel = peer_state
-					.inbound_channels_by_id
-					.get_mut(&jit_channel_id)
-					.ok_or(LightningError {
-						err: format!(
-							"Received get_versions response for an unknown channel: {:?}",
-							jit_channel_id,
-						),
-						action: ErrorAction::IgnoreAndLog(Level::Info),
-					})?;
-
-				let token = jit_channel.config.token.clone();
-
-				let version = match jit_channel.versions_received(result.versions) {
-					Ok(version) => version,
-					Err(e) => {
-						peer_state.remove_inbound_channel(jit_channel_id);
-						return Err(e);
-					}
-				};
-
-				let request_id = self.generate_request_id();
-				peer_state.insert_request(request_id.clone(), jit_channel_id);
-
-				{
-					let mut pending_messages = self.pending_messages.lock().unwrap();
-					pending_messages.push((
-						*counterparty_node_id,
-						LSPS2Message::Request(
-							request_id,
-							LSPS2Request::GetInfo(GetInfoRequest { version, token }),
-						)
-						.into(),
-					));
-				}
-
-				if let Some(peer_manager) = self.peer_manager.lock().unwrap().as_ref() {
-					peer_manager.as_ref().process_events();
-				}
-			}
-			None => {
-				return Err(LightningError {
-					err: format!(
-						"Received get_versions response from unknown peer: {:?}",
-						counterparty_node_id
-					),
-					action: ErrorAction::IgnoreAndLog(Level::Info),
-				})
-			}
-		}
-
-		Ok(())
-	}
-
 	fn handle_get_info_request(
 		&self, request_id: RequestId, counterparty_node_id: &PublicKey, params: GetInfoRequest,
 	) -> Result<(), LightningError> {
@@ -966,103 +624,13 @@ where
 			.pending_requests
 			.insert(request_id.clone(), LSPS2Request::GetInfo(params.clone()));
 
-		self.enqueue_event(Event::LSPS2(LSPS2Event::GetInfo {
+		self.enqueue_event(Event::LSPS2Service(LSPS2ServiceEvent::GetInfo {
 			request_id,
 			counterparty_node_id: *counterparty_node_id,
 			version: params.version,
 			token: params.token,
 		}));
 		Ok(())
-	}
-
-	fn handle_get_info_response(
-		&self, request_id: RequestId, counterparty_node_id: &PublicKey, result: GetInfoResponse,
-	) -> Result<(), LightningError> {
-		let outer_state_lock = self.per_peer_state.read().unwrap();
-		match outer_state_lock.get(counterparty_node_id) {
-			Some(inner_state_lock) => {
-				let mut peer_state = inner_state_lock.lock().unwrap();
-
-				let jit_channel_id =
-					peer_state.request_to_cid.remove(&request_id).ok_or(LightningError {
-						err: format!(
-							"Received get_info response for an unknown request: {:?}",
-							request_id
-						),
-						action: ErrorAction::IgnoreAndLog(Level::Info),
-					})?;
-
-				let jit_channel = peer_state
-					.inbound_channels_by_id
-					.get_mut(&jit_channel_id)
-					.ok_or(LightningError {
-						err: format!(
-							"Received get_info response for an unknown channel: {:?}",
-							jit_channel_id
-						),
-						action: ErrorAction::IgnoreAndLog(Level::Info),
-					})?;
-
-				if let Err(e) = jit_channel.info_received() {
-					peer_state.remove_inbound_channel(jit_channel_id);
-					return Err(e);
-				}
-
-				self.enqueue_event(Event::LSPS2(LSPS2Event::GetInfoResponse {
-					counterparty_node_id: *counterparty_node_id,
-					opening_fee_params_menu: result.opening_fee_params_menu,
-					min_payment_size_msat: result.min_payment_size_msat,
-					max_payment_size_msat: result.max_payment_size_msat,
-					jit_channel_id,
-					user_channel_id: jit_channel.config.user_id,
-				}));
-			}
-			None => {
-				return Err(LightningError {
-					err: format!(
-						"Received get_info response from unknown peer: {:?}",
-						counterparty_node_id
-					),
-					action: ErrorAction::IgnoreAndLog(Level::Info),
-				})
-			}
-		}
-
-		Ok(())
-	}
-
-	fn handle_get_info_error(
-		&self, request_id: RequestId, counterparty_node_id: &PublicKey, _error: ResponseError,
-	) -> Result<(), LightningError> {
-		let outer_state_lock = self.per_peer_state.read().unwrap();
-		match outer_state_lock.get(counterparty_node_id) {
-			Some(inner_state_lock) => {
-				let mut peer_state = inner_state_lock.lock().unwrap();
-
-				let jit_channel_id =
-					peer_state.request_to_cid.remove(&request_id).ok_or(LightningError {
-						err: format!(
-							"Received get_info error for an unknown request: {:?}",
-							request_id
-						),
-						action: ErrorAction::IgnoreAndLog(Level::Info),
-					})?;
-
-				peer_state.inbound_channels_by_id.remove(&jit_channel_id).ok_or(
-					LightningError {
-						err: format!(
-							"Received get_info error for an unknown channel: {:?}",
-							jit_channel_id
-						),
-						action: ErrorAction::IgnoreAndLog(Level::Info),
-					},
-				)?;
-				Ok(())
-			}
-			None => {
-				return Err(LightningError { err: format!("Received error response for a get_info request from an unknown counterparty ({:?})",counterparty_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
-			}
-		}
 	}
 
 	fn handle_buy_request(
@@ -1085,7 +653,7 @@ where
 		}
 
 		if let Some(payment_size_msat) = params.payment_size_msat {
-			if payment_size_msat < self.min_payment_size_msat {
+			if payment_size_msat < self.config.min_payment_size_msat {
 				self.enqueue_response(
 					*counterparty_node_id,
 					request_id,
@@ -1102,7 +670,7 @@ where
 				});
 			}
 
-			if payment_size_msat > self.max_payment_size_msat {
+			if payment_size_msat > self.config.max_payment_size_msat {
 				self.enqueue_response(
 					*counterparty_node_id,
 					request_id,
@@ -1162,7 +730,7 @@ where
 
 		// TODO: if payment_size_msat is specified, make sure our node has sufficient incoming liquidity from public network to receive it.
 
-		if !is_valid_opening_fee_params(&params.opening_fee_params, &self.promise_secret) {
+		if !is_valid_opening_fee_params(&params.opening_fee_params, &self.config.promise_secret) {
 			self.enqueue_response(
 				*counterparty_node_id,
 				request_id,
@@ -1186,7 +754,7 @@ where
 			.pending_requests
 			.insert(request_id.clone(), LSPS2Request::Buy(params.clone()));
 
-		self.enqueue_event(Event::LSPS2(LSPS2Event::BuyRequest {
+		self.enqueue_event(Event::LSPS2Service(LSPS2ServiceEvent::BuyRequest {
 			request_id,
 			version: params.version,
 			counterparty_node_id: *counterparty_node_id,
@@ -1196,112 +764,10 @@ where
 
 		Ok(())
 	}
-
-	fn handle_buy_response(
-		&self, request_id: RequestId, counterparty_node_id: &PublicKey, result: BuyResponse,
-	) -> Result<(), LightningError> {
-		let outer_state_lock = self.per_peer_state.read().unwrap();
-		match outer_state_lock.get(counterparty_node_id) {
-			Some(inner_state_lock) => {
-				let mut peer_state = inner_state_lock.lock().unwrap();
-
-				let jit_channel_id =
-					peer_state.request_to_cid.remove(&request_id).ok_or(LightningError {
-						err: format!(
-							"Received buy response for an unknown request: {:?}",
-							request_id
-						),
-						action: ErrorAction::IgnoreAndLog(Level::Info),
-					})?;
-
-				let jit_channel = peer_state
-					.inbound_channels_by_id
-					.get_mut(&jit_channel_id)
-					.ok_or(LightningError {
-						err: format!(
-							"Received buy response for an unknown channel: {:?}",
-							jit_channel_id
-						),
-						action: ErrorAction::IgnoreAndLog(Level::Info),
-					})?;
-
-				if let Err(e) = jit_channel.invoice_params_received(
-					result.client_trusts_lsp,
-					result.jit_channel_scid.clone(),
-				) {
-					peer_state.remove_inbound_channel(jit_channel_id);
-					return Err(e);
-				}
-
-				if let Ok(scid) = result.jit_channel_scid.to_scid() {
-					self.enqueue_event(Event::LSPS2(LSPS2Event::InvoiceGenerationReady {
-						counterparty_node_id: *counterparty_node_id,
-						scid,
-						cltv_expiry_delta: result.lsp_cltv_expiry_delta,
-						payment_size_msat: jit_channel.config.payment_size_msat,
-						client_trusts_lsp: result.client_trusts_lsp,
-						user_channel_id: jit_channel.config.user_id,
-					}));
-				} else {
-					return Err(LightningError {
-						err: format!(
-							"Received buy response with an invalid scid {:?}",
-							result.jit_channel_scid
-						),
-						action: ErrorAction::IgnoreAndLog(Level::Info),
-					});
-				}
-			}
-			None => {
-				return Err(LightningError {
-					err: format!(
-						"Received buy response from unknown peer: {:?}",
-						counterparty_node_id
-					),
-					action: ErrorAction::IgnoreAndLog(Level::Info),
-				});
-			}
-		}
-		Ok(())
-	}
-
-	fn handle_buy_error(
-		&self, request_id: RequestId, counterparty_node_id: &PublicKey, _error: ResponseError,
-	) -> Result<(), LightningError> {
-		let outer_state_lock = self.per_peer_state.read().unwrap();
-		match outer_state_lock.get(counterparty_node_id) {
-			Some(inner_state_lock) => {
-				let mut peer_state = inner_state_lock.lock().unwrap();
-
-				let jit_channel_id =
-					peer_state.request_to_cid.remove(&request_id).ok_or(LightningError {
-						err: format!("Received buy error for an unknown request: {:?}", request_id),
-						action: ErrorAction::IgnoreAndLog(Level::Info),
-					})?;
-
-				let _jit_channel = peer_state
-					.inbound_channels_by_id
-					.remove(&jit_channel_id)
-					.ok_or(LightningError {
-						err: format!(
-							"Received buy error for an unknown channel: {:?}",
-							jit_channel_id
-						),
-						action: ErrorAction::IgnoreAndLog(Level::Info),
-					})?;
-				Ok(())
-			}
-			None => {
-				return Err(LightningError { err: format!("Received error response for a buy request from an unknown counterparty ({:?})",counterparty_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
-			}
-		}
-	}
 }
 
-impl<ES: Deref, CM: Deref + Clone, PM: Deref> ProtocolMessageHandler
-	for LSPS2MessageHandler<ES, CM, PM>
+impl<CM: Deref + Clone, PM: Deref> ProtocolMessageHandler for LSPS2ServiceHandler<CM, PM>
 where
-	ES::Target: EntropySource,
 	CM::Target: AChannelManager,
 	PM::Target: APeerManager,
 {
@@ -1323,23 +789,13 @@ where
 					self.handle_buy_request(request_id, counterparty_node_id, params)
 				}
 			},
-			LSPS2Message::Response(request_id, response) => match response {
-				LSPS2Response::GetVersions(result) => {
-					self.handle_get_versions_response(request_id, counterparty_node_id, result)
-				}
-				LSPS2Response::GetInfo(result) => {
-					self.handle_get_info_response(request_id, counterparty_node_id, result)
-				}
-				LSPS2Response::GetInfoError(error) => {
-					self.handle_get_info_error(request_id, counterparty_node_id, error)
-				}
-				LSPS2Response::Buy(result) => {
-					self.handle_buy_response(request_id, counterparty_node_id, result)
-				}
-				LSPS2Response::BuyError(error) => {
-					self.handle_buy_error(request_id, counterparty_node_id, error)
-				}
-			},
+			_ => {
+				debug_assert!(
+					false,
+					"Service handler received LSPS2 response message. This should never happen."
+				);
+				Err(LightningError { err: format!("Service handler received LSPS2 response message from node {:?}. This should never happen.", counterparty_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)})
+			}
 		}
 	}
 }

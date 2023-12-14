@@ -6,7 +6,9 @@ use crate::lsps0::msgs::{LSPSMessage, RawLSPSMessage, LSPS_MESSAGE_TYPE_ID};
 #[cfg(lsps1)]
 use crate::lsps1::message_handler::{LSPS1Config, LSPS1MessageHandler};
 
-use crate::lsps2::message_handler::{LSPS2Config, LSPS2MessageHandler};
+use crate::lsps2::client::{LSPS2ClientConfig, LSPS2ClientHandler};
+use crate::lsps2::msgs::LSPS2Message;
+use crate::lsps2::service::{LSPS2ServiceConfig, LSPS2ServiceHandler};
 use crate::prelude::{HashMap, String, Vec};
 use crate::sync::{Arc, Mutex, RwLock};
 
@@ -35,9 +37,11 @@ pub struct LiquidityProviderConfig {
 	/// LSPS1 Configuration
 	#[cfg(lsps1)]
 	pub lsps1_config: Option<LSPS1Config>,
-	/// Optional configuration for JIT channels
+	/// Optional client-side configuration for JIT channels.
+	pub lsps2_client_config: Option<LSPS2ClientConfig>,
+	/// Optional server-side configuration for JIT channels
 	/// should you want to support them.
-	pub lsps2_config: Option<LSPS2Config>,
+	pub lsps2_service_config: Option<LSPS2ServiceConfig>,
 }
 
 /// The main interface into LSP functionality.
@@ -52,8 +56,8 @@ pub struct LiquidityProviderConfig {
 /// Users need to continually poll [`LiquidityManager::get_and_clear_pending_events`] in order to surface
 /// [`Event`]'s that likely need to be handled.
 ///
-/// If configured, users must forward the [`Event::HTLCIntercepted`] event parameters to [`LSPS2MessageHandler::htlc_intercepted`]
-/// and the [`Event::ChannelReady`] event parameters to [`LSPS2MessageHandler::channel_ready`].
+/// If configured, users must forward the [`Event::HTLCIntercepted`] event parameters to [`LSPS2ServiceHandler::htlc_intercepted`]
+/// and the [`Event::ChannelReady`] event parameters to [`LSPS2ServiceHandler::channel_ready`].
 ///
 /// [`PeerManager`]: lightning::ln::peer_handler::PeerManager
 /// [`MessageHandler`]: lightning::ln::peer_handler::MessageHandler
@@ -76,7 +80,8 @@ pub struct LiquidityManager<
 	lsps0_message_handler: LSPS0MessageHandler<ES>,
 	#[cfg(lsps1)]
 	lsps1_message_handler: Option<LSPS1MessageHandler<ES, CM, PM, C>>,
-	lsps2_message_handler: Option<LSPS2MessageHandler<ES, CM, PM>>,
+	lsps2_service_handler: Option<LSPS2ServiceHandler<CM, PM>>,
+	lsps2_client_handler: Option<LSPS2ClientHandler<ES, PM>>,
 	provider_config: Option<LiquidityProviderConfig>,
 	channel_manager: CM,
 	chain_source: Option<C>,
@@ -109,14 +114,23 @@ where {
 			Arc::clone(&pending_messages),
 		);
 
-		let lsps2_message_handler = provider_config.as_ref().and_then(|config| {
-			config.lsps2_config.as_ref().map(|config| {
-				LSPS2MessageHandler::new(
+		let lsps2_client_handler = provider_config.as_ref().and_then(|config| {
+			config.lsps2_client_config.map(|config| {
+				LSPS2ClientHandler::new(
 					entropy_source.clone(),
-					config,
+					Arc::clone(&pending_messages),
+					Arc::clone(&pending_events),
+					config.clone(),
+				)
+			})
+		});
+		let lsps2_service_handler = provider_config.as_ref().and_then(|config| {
+			config.lsps2_service_config.as_ref().map(|config| {
+				LSPS2ServiceHandler::new(
 					Arc::clone(&pending_messages),
 					Arc::clone(&pending_events),
 					channel_manager.clone(),
+					config.clone(),
 				)
 			})
 		});
@@ -142,7 +156,8 @@ where {
 			lsps0_message_handler,
 			#[cfg(lsps1)]
 			lsps1_message_handler,
-			lsps2_message_handler,
+			lsps2_client_handler,
+			lsps2_service_handler,
 			provider_config,
 			channel_manager,
 			chain_source,
@@ -163,9 +178,14 @@ where {
 		self.lsps1_message_handler.as_ref()
 	}
 
-	/// Returns a reference to the LSPS2 message handler.
-	pub fn lsps2_message_handler(&self) -> Option<&LSPS2MessageHandler<ES, CM, PM>> {
-		self.lsps2_message_handler.as_ref()
+	/// Returns a reference to the LSPS2 client-side handler.
+	pub fn lsps2_client_handler(&self) -> Option<&LSPS2ClientHandler<ES, PM>> {
+		self.lsps2_client_handler.as_ref()
+	}
+
+	/// Returns a reference to the LSPS2 server-side handler.
+	pub fn lsps2_service_handler(&self) -> Option<&LSPS2ServiceHandler<CM, PM>> {
+		self.lsps2_service_handler.as_ref()
 	}
 
 	/// Blocks the current thread until next event is ready and returns it.
@@ -205,8 +225,11 @@ where {
 		if let Some(lsps1_message_handler) = &self.lsps1_message_handler {
 			lsps1_message_handler.set_peer_manager(peer_manager.clone());
 		}
-		if let Some(lsps2_message_handler) = &self.lsps2_message_handler {
-			lsps2_message_handler.set_peer_manager(peer_manager);
+		if let Some(lsps2_client_handler) = &self.lsps2_client_handler {
+			lsps2_client_handler.set_peer_manager(peer_manager.clone());
+		}
+		if let Some(lsps2_service_handler) = &self.lsps2_service_handler {
+			lsps2_service_handler.set_peer_manager(peer_manager);
 		}
 	}
 
@@ -229,14 +252,26 @@ where {
 					return Err(LightningError { err: format!("Received LSPS1 message without LSPS1 message handler configured. From node = {:?}", sender_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
 				}
 			},
-			LSPSMessage::LSPS2(msg) => match &self.lsps2_message_handler {
-				Some(lsps2_message_handler) => {
-					lsps2_message_handler.handle_message(msg, sender_node_id)?;
+			LSPSMessage::LSPS2(msg @ LSPS2Message::Response(..)) => {
+				match &self.lsps2_client_handler {
+					Some(lsps2_client_handler) => {
+						lsps2_client_handler.handle_message(msg, sender_node_id)?;
+					}
+					None => {
+						return Err(LightningError { err: format!("Received LSPS2 response message without LSPS2 client handler configured. From node = {:?}", sender_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
+					}
 				}
-				None => {
-					return Err(LightningError { err: format!("Received LSPS2 message without LSPS2 message handler configured. From node = {:?}", sender_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
+			}
+			LSPSMessage::LSPS2(msg @ LSPS2Message::Request(..)) => {
+				match &self.lsps2_service_handler {
+					Some(lsps2_service_handler) => {
+						lsps2_service_handler.handle_message(msg, sender_node_id)?;
+					}
+					None => {
+						return Err(LightningError { err: format!("Received LSPS2 request message without LSPS2 service handler configured. From node = {:?}", sender_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
+					}
 				}
-			},
+			}
 		}
 		Ok(())
 	}

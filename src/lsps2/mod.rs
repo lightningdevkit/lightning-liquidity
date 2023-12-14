@@ -9,7 +9,8 @@
 
 //! Implementation of LSPS2: JIT Channel Negotiation specification.
 
+pub mod client;
 pub mod event;
-pub mod message_handler;
 pub mod msgs;
+pub mod service;
 pub(crate) mod utils;
