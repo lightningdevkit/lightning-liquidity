@@ -10,13 +10,13 @@
 //! Contains the main LSPS2 client object, [`LSPS2ClientHandler`].
 
 use crate::events::{Event, EventQueue};
-use crate::lsps0::msgs::{LSPSMessage, ProtocolMessageHandler, RequestId, ResponseError};
+use crate::lsps0::msgs::{ProtocolMessageHandler, RequestId, ResponseError};
 use crate::lsps2::event::LSPS2ClientEvent;
+use crate::message_queue::MessageQueue;
 use crate::prelude::{HashMap, String, ToString, Vec};
 use crate::sync::{Arc, Mutex, RwLock};
 
 use lightning::ln::msgs::{ErrorAction, LightningError};
-use lightning::ln::peer_handler::APeerManager;
 use lightning::sign::EntropySource;
 use lightning::util::errors::APIError;
 use lightning::util::logger::Level;
@@ -200,51 +200,35 @@ impl PeerState {
 }
 
 /// The main object allowing to send and receive LSPS2 messages.
-pub struct LSPS2ClientHandler<ES: Deref, PM: Deref>
+pub struct LSPS2ClientHandler<ES: Deref, MQ: Deref>
 where
 	ES::Target: EntropySource,
-	PM::Target: APeerManager,
+	MQ::Target: MessageQueue,
 {
 	entropy_source: ES,
-	peer_manager: Mutex<Option<PM>>,
-	pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
+	pending_messages: MQ,
 	pending_events: Arc<EventQueue>,
 	per_peer_state: RwLock<HashMap<PublicKey, Mutex<PeerState>>>,
 	_config: LSPS2ClientConfig,
 }
 
-impl<ES: Deref, PM: Deref> LSPS2ClientHandler<ES, PM>
+impl<ES: Deref, MQ: Deref> LSPS2ClientHandler<ES, MQ>
 where
 	ES::Target: EntropySource,
-	PM::Target: APeerManager,
+	MQ::Target: MessageQueue,
 {
 	/// Constructs an `LSPS2ClientHandler`.
 	pub(crate) fn new(
-		entropy_source: ES, pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
-		pending_events: Arc<EventQueue>, config: LSPS2ClientConfig,
+		entropy_source: ES, pending_messages: MQ, pending_events: Arc<EventQueue>,
+		config: LSPS2ClientConfig,
 	) -> Self {
 		Self {
 			entropy_source,
 			pending_messages,
 			pending_events,
 			per_peer_state: RwLock::new(HashMap::new()),
-			peer_manager: Mutex::new(None),
 			_config: config,
 		}
-	}
-
-	/// Set a [`PeerManager`] reference for the message handler.
-	///
-	/// This allows the message handler to wake the [`PeerManager`] by calling
-	/// [`PeerManager::process_events`] after enqueing messages to be sent.
-	///
-	/// Without this the messages will be sent based on whatever polling interval
-	/// your background processor uses.
-	///
-	/// [`PeerManager`]: lightning::ln::peer_handler::PeerManager
-	/// [`PeerManager::process_events`]: lightning::ln::peer_handler::PeerManager::process_events
-	pub fn set_peer_manager(&self, peer_manager: PM) {
-		*self.peer_manager.lock().unwrap() = Some(peer_manager);
 	}
 
 	/// Initiate the creation of an invoice that when paid will open a channel
@@ -277,18 +261,11 @@ where
 		let request_id = crate::utils::generate_request_id(&self.entropy_source);
 		peer_state_lock.insert_request(request_id.clone(), jit_channel_id);
 
-		{
-			let mut pending_messages = self.pending_messages.lock().unwrap();
-			pending_messages.push((
-				counterparty_node_id,
-				LSPS2Message::Request(request_id, LSPS2Request::GetVersions(GetVersionsRequest {}))
-					.into(),
-			));
-		}
-
-		if let Some(peer_manager) = self.peer_manager.lock().unwrap().as_ref() {
-			peer_manager.as_ref().process_events();
-		}
+		self.pending_messages.enqueue(
+			&counterparty_node_id,
+			LSPS2Message::Request(request_id, LSPS2Request::GetVersions(GetVersionsRequest {}))
+				.into(),
+		);
 	}
 
 	/// Used by client to confirm which channel parameters to use for the JIT Channel buy request.
@@ -321,24 +298,18 @@ where
 					let payment_size_msat = jit_channel.config.payment_size_msat;
 					peer_state.insert_request(request_id.clone(), jit_channel_id);
 
-					{
-						let mut pending_messages = self.pending_messages.lock().unwrap();
-						pending_messages.push((
-							counterparty_node_id,
-							LSPS2Message::Request(
-								request_id,
-								LSPS2Request::Buy(BuyRequest {
-									version,
-									opening_fee_params,
-									payment_size_msat,
-								}),
-							)
-							.into(),
-						));
-					}
-					if let Some(peer_manager) = self.peer_manager.lock().unwrap().as_ref() {
-						peer_manager.as_ref().process_events();
-					}
+					self.pending_messages.enqueue(
+						&counterparty_node_id,
+						LSPS2Message::Request(
+							request_id,
+							LSPS2Request::Buy(BuyRequest {
+								version,
+								opening_fee_params,
+								payment_size_msat,
+							}),
+						)
+						.into(),
+					);
 				} else {
 					return Err(APIError::APIMisuseError {
 						err: format!("Channel with id {} not found", jit_channel_id),
@@ -403,21 +374,14 @@ where
 				let request_id = crate::utils::generate_request_id(&self.entropy_source);
 				peer_state.insert_request(request_id.clone(), jit_channel_id);
 
-				{
-					let mut pending_messages = self.pending_messages.lock().unwrap();
-					pending_messages.push((
-						*counterparty_node_id,
-						LSPS2Message::Request(
-							request_id,
-							LSPS2Request::GetInfo(GetInfoRequest { version, token }),
-						)
-						.into(),
-					));
-				}
-
-				if let Some(peer_manager) = self.peer_manager.lock().unwrap().as_ref() {
-					peer_manager.as_ref().process_events();
-				}
+				self.pending_messages.enqueue(
+					counterparty_node_id,
+					LSPS2Message::Request(
+						request_id,
+						LSPS2Request::GetInfo(GetInfoRequest { version, token }),
+					)
+					.into(),
+				);
 			}
 			None => {
 				return Err(LightningError {
@@ -628,10 +592,10 @@ where
 	}
 }
 
-impl<ES: Deref, PM: Deref> ProtocolMessageHandler for LSPS2ClientHandler<ES, PM>
+impl<ES: Deref, MQ: Deref> ProtocolMessageHandler for LSPS2ClientHandler<ES, MQ>
 where
 	ES::Target: EntropySource,
-	PM::Target: APeerManager,
+	MQ::Target: MessageQueue,
 {
 	type ProtocolMessage = LSPS2Message;
 	const PROTOCOL_NUMBER: Option<u16> = Some(2);

@@ -44,7 +44,10 @@ pub mod lsps0;
 pub mod lsps1;
 pub mod lsps2;
 mod manager;
+pub mod message_queue;
 mod sync;
+#[cfg(test)]
+mod tests;
 mod utils;
 
 pub use manager::{LiquidityClientConfig, LiquidityManager, LiquidityServiceConfig};

@@ -14,33 +14,35 @@
 //! information.
 
 use crate::lsps0::msgs::{
-	LSPS0Message, LSPS0Request, LSPS0Response, LSPSMessage, ListProtocolsResponse,
-	ProtocolMessageHandler, RequestId,
+	LSPS0Message, LSPS0Request, LSPS0Response, ListProtocolsResponse, ProtocolMessageHandler,
+	RequestId,
 };
+use crate::message_queue::MessageQueue;
 use crate::prelude::Vec;
-use crate::sync::{Arc, Mutex};
 
 use lightning::ln::msgs::{ErrorAction, LightningError};
 use lightning::util::logger::Level;
 
 use bitcoin::secp256k1::PublicKey;
 
+use core::ops::Deref;
+
 /// The main server-side object allowing to send and receive LSPS0 messages.
-pub struct LSPS0ServiceHandler {
-	pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
+pub struct LSPS0ServiceHandler<MQ: Deref>
+where
+	MQ::Target: MessageQueue,
+{
+	pending_messages: MQ,
 	protocols: Vec<u16>,
 }
 
-impl LSPS0ServiceHandler {
+impl<MQ: Deref> LSPS0ServiceHandler<MQ>
+where
+	MQ::Target: MessageQueue,
+{
 	/// Returns a new instance of [`LSPS0ServiceHandler`].
-	pub(crate) fn new(
-		protocols: Vec<u16>, pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
-	) -> Self {
+	pub(crate) fn new(protocols: Vec<u16>, pending_messages: MQ) -> Self {
 		Self { protocols, pending_messages }
-	}
-
-	fn enqueue_message(&self, counterparty_node_id: PublicKey, message: LSPS0Message) {
-		self.pending_messages.lock().unwrap().push((counterparty_node_id, message.into()));
 	}
 
 	fn handle_request(
@@ -54,14 +56,17 @@ impl LSPS0ServiceHandler {
 						protocols: self.protocols.clone(),
 					}),
 				);
-				self.enqueue_message(*counterparty_node_id, msg);
+				self.pending_messages.enqueue(counterparty_node_id, msg.into());
 				Ok(())
 			}
 		}
 	}
 }
 
-impl ProtocolMessageHandler for LSPS0ServiceHandler {
+impl<MQ: Deref> ProtocolMessageHandler for LSPS0ServiceHandler<MQ>
+where
+	MQ::Target: MessageQueue,
+{
 	type ProtocolMessage = LSPS0Message;
 	const PROTOCOL_NUMBER: Option<u16> = None;
 
@@ -86,7 +91,8 @@ impl ProtocolMessageHandler for LSPS0ServiceHandler {
 #[cfg(test)]
 mod tests {
 
-	use crate::lsps0::msgs::ListProtocolsRequest;
+	use crate::lsps0::msgs::{LSPSMessage, ListProtocolsRequest};
+	use crate::tests::utils::TestMessageQueue;
 	use crate::utils;
 	use alloc::string::ToString;
 	use alloc::sync::Arc;
@@ -96,7 +102,7 @@ mod tests {
 	#[test]
 	fn test_handle_list_protocols_request() {
 		let protocols: Vec<u16> = vec![];
-		let pending_messages = Arc::new(Mutex::new(vec![]));
+		let pending_messages = Arc::new(TestMessageQueue::new());
 
 		let lsps0_handler = Arc::new(LSPS0ServiceHandler::new(protocols, pending_messages.clone()));
 
@@ -110,7 +116,7 @@ mod tests {
 		.unwrap();
 
 		lsps0_handler.handle_message(list_protocols_request, &counterparty_node_id).unwrap();
-		let pending_messages = pending_messages.lock().unwrap();
+		let pending_messages = pending_messages.get_and_clear_pending_msgs();
 
 		assert_eq!(pending_messages.len(), 1);
 

@@ -4,6 +4,7 @@ use crate::lsps0::msgs::{
 	LSPS0Message, LSPSMessage, ProtocolMessageHandler, RawLSPSMessage, LSPS_MESSAGE_TYPE_ID,
 };
 use crate::lsps0::service::LSPS0ServiceHandler;
+use crate::message_queue::{DefaultMessageQueue, MessageQueue};
 
 #[cfg(lsps1)]
 use crate::lsps1::client::{LSPS1ClientConfig, LSPS1ClientHandler};
@@ -88,17 +89,17 @@ pub struct LiquidityManager<
 	PM::Target: APeerManager,
 	C::Target: Filter,
 {
-	pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
+	pending_messages: Arc<DefaultMessageQueue<PM>>,
 	pending_events: Arc<EventQueue>,
 	request_id_to_method_map: Mutex<HashMap<String, String>>,
-	lsps0_client_handler: LSPS0ClientHandler<ES>,
-	lsps0_service_handler: Option<LSPS0ServiceHandler>,
+	lsps0_client_handler: LSPS0ClientHandler<ES, Arc<DefaultMessageQueue<PM>>>,
+	lsps0_service_handler: Option<LSPS0ServiceHandler<Arc<DefaultMessageQueue<PM>>>>,
 	#[cfg(lsps1)]
-	lsps1_service_handler: Option<LSPS1ServiceHandler<ES, CM, PM, C>>,
+	lsps1_service_handler: Option<LSPS1ServiceHandler<ES, CM, Arc<DefaultMessageQueue<PM>>, C>>,
 	#[cfg(lsps1)]
-	lsps1_client_handler: Option<LSPS1ClientHandler<ES, CM, PM, C>>,
-	lsps2_service_handler: Option<LSPS2ServiceHandler<CM, PM>>,
-	lsps2_client_handler: Option<LSPS2ClientHandler<ES, PM>>,
+	lsps1_client_handler: Option<LSPS1ClientHandler<ES, CM, Arc<DefaultMessageQueue<PM>>, C>>,
+	lsps2_service_handler: Option<LSPS2ServiceHandler<CM, Arc<DefaultMessageQueue<PM>>>>,
+	lsps2_client_handler: Option<LSPS2ClientHandler<ES, Arc<DefaultMessageQueue<PM>>>>,
 	service_config: Option<LiquidityServiceConfig>,
 	_client_config: Option<LiquidityClientConfig>,
 	best_block: Option<RwLock<BestBlock>>,
@@ -123,7 +124,7 @@ where
 		client_config: Option<LiquidityClientConfig>,
 	) -> Self
 where {
-		let pending_messages = Arc::new(Mutex::new(vec![]));
+		let pending_messages = Arc::new(DefaultMessageQueue::new());
 		let pending_events = Arc::new(EventQueue::new());
 
 		let lsps0_client_handler = LSPS0ClientHandler::new(
@@ -207,34 +208,44 @@ where {
 	}
 
 	/// Returns a reference to the LSPS0 client-side handler.
-	pub fn lsps0_client_handler(&self) -> &LSPS0ClientHandler<ES> {
+	pub fn lsps0_client_handler(&self) -> &LSPS0ClientHandler<ES, Arc<DefaultMessageQueue<PM>>> {
 		&self.lsps0_client_handler
 	}
 
 	/// Returns a reference to the LSPS0 server-side handler.
-	pub fn lsps0_service_handler(&self) -> Option<&LSPS0ServiceHandler> {
+	pub fn lsps0_service_handler(
+		&self,
+	) -> Option<&LSPS0ServiceHandler<Arc<DefaultMessageQueue<PM>>>> {
 		self.lsps0_service_handler.as_ref()
 	}
 
 	/// Returns a reference to the LSPS1 client-side handler.
 	#[cfg(lsps1)]
-	pub fn lsps1_client_handler(&self) -> Option<&LSPS1ClientHandler<ES, CM, PM, C>> {
+	pub fn lsps1_client_handler(
+		&self,
+	) -> Option<&LSPS1ClientHandler<ES, CM, Arc<DefaultMessageQueue<PM>>, C>> {
 		self.lsps1_client_handler.as_ref()
 	}
 
 	/// Returns a reference to the LSPS1 server-side handler.
 	#[cfg(lsps1)]
-	pub fn lsps1_service_handler(&self) -> Option<&LSPS1ServiceHandler<ES, CM, PM, C>> {
+	pub fn lsps1_service_handler(
+		&self,
+	) -> Option<&LSPS1ServiceHandler<ES, CM, Arc<DefaultMessageQueue<PM>>, C>> {
 		self.lsps1_service_handler.as_ref()
 	}
 
 	/// Returns a reference to the LSPS2 client-side handler.
-	pub fn lsps2_client_handler(&self) -> Option<&LSPS2ClientHandler<ES, PM>> {
+	pub fn lsps2_client_handler(
+		&self,
+	) -> Option<&LSPS2ClientHandler<ES, Arc<DefaultMessageQueue<PM>>>> {
 		self.lsps2_client_handler.as_ref()
 	}
 
 	/// Returns a reference to the LSPS2 server-side handler.
-	pub fn lsps2_service_handler(&self) -> Option<&LSPS2ServiceHandler<CM, PM>> {
+	pub fn lsps2_service_handler(
+		&self,
+	) -> Option<&LSPS2ServiceHandler<CM, Arc<DefaultMessageQueue<PM>>>> {
 		self.lsps2_service_handler.as_ref()
 	}
 
@@ -271,20 +282,7 @@ where {
 	/// [`PeerManager`]: lightning::ln::peer_handler::PeerManager
 	/// [`PeerManager::process_events`]: lightning::ln::peer_handler::PeerManager::process_events
 	pub fn set_peer_manager(&self, peer_manager: PM) {
-		#[cfg(lsps1)]
-		if let Some(lsps1_client_handler) = &self.lsps1_client_handler {
-			lsps1_client_handler.set_peer_manager(peer_manager.clone());
-		}
-		#[cfg(lsps1)]
-		if let Some(lsps1_service_handler) = &self.lsps1_service_handler {
-			lsps1_service_handler.set_peer_manager(peer_manager.clone());
-		}
-		if let Some(lsps2_client_handler) = &self.lsps2_client_handler {
-			lsps2_client_handler.set_peer_manager(peer_manager.clone());
-		}
-		if let Some(lsps2_service_handler) = &self.lsps2_service_handler {
-			lsps2_service_handler.set_peer_manager(peer_manager);
-		}
+		self.pending_messages.set_peer_manager(peer_manager);
 	}
 
 	fn handle_lsps_message(
@@ -348,11 +346,6 @@ where {
 		}
 		Ok(())
 	}
-
-	fn enqueue_message(&self, node_id: PublicKey, msg: LSPSMessage) {
-		let mut pending_msgs = self.pending_messages.lock().unwrap();
-		pending_msgs.push((node_id, msg));
-	}
 }
 
 impl<ES: Deref + Clone + Clone, CM: Deref + Clone, PM: Deref + Clone, C: Deref + Clone>
@@ -394,7 +387,7 @@ where
 		match message {
 			Ok(msg) => self.handle_lsps_message(msg, sender_node_id),
 			Err(_) => {
-				self.enqueue_message(*sender_node_id, LSPSMessage::Invalid);
+				self.pending_messages.enqueue(sender_node_id, LSPSMessage::Invalid);
 				Ok(())
 			}
 		}
@@ -403,15 +396,14 @@ where
 	fn get_and_clear_pending_msg(&self) -> Vec<(PublicKey, Self::CustomMessage)> {
 		let mut request_id_to_method_map = self.request_id_to_method_map.lock().unwrap();
 		self.pending_messages
-			.lock()
-			.unwrap()
-			.drain(..)
+			.get_and_clear_pending_msgs()
+			.iter()
 			.map(|(public_key, lsps_message)| {
 				if let Some((request_id, method_name)) = lsps_message.get_request_id_and_method() {
 					request_id_to_method_map.insert(request_id, method_name);
 				}
 				(
-					public_key,
+					*public_key,
 					RawLSPSMessage { payload: serde_json::to_string(&lsps_message).unwrap() },
 				)
 			})

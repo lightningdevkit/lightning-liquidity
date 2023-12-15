@@ -7,11 +7,11 @@
 use crate::events::{Event, EventQueue};
 use crate::lsps0::event::LSPS0ClientEvent;
 use crate::lsps0::msgs::{
-	LSPS0Message, LSPS0Request, LSPS0Response, LSPSMessage, ListProtocolsRequest,
-	ListProtocolsResponse, ProtocolMessageHandler, ResponseError,
+	LSPS0Message, LSPS0Request, LSPS0Response, ListProtocolsRequest, ListProtocolsResponse,
+	ProtocolMessageHandler, ResponseError,
 };
-use crate::prelude::Vec;
-use crate::sync::{Arc, Mutex};
+use crate::message_queue::MessageQueue;
+use crate::sync::Arc;
 use crate::utils;
 
 use lightning::ln::msgs::{ErrorAction, LightningError};
@@ -23,23 +23,24 @@ use bitcoin::secp256k1::PublicKey;
 use core::ops::Deref;
 
 /// A message handler capable of sending and handling LSPS0 messages.
-pub struct LSPS0ClientHandler<ES: Deref>
+pub struct LSPS0ClientHandler<ES: Deref, MQ: Deref>
 where
 	ES::Target: EntropySource,
+	MQ::Target: MessageQueue,
 {
 	entropy_source: ES,
-	pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
+	pending_messages: MQ,
 	pending_events: Arc<EventQueue>,
 }
 
-impl<ES: Deref> LSPS0ClientHandler<ES>
+impl<ES: Deref, MQ: Deref> LSPS0ClientHandler<ES, MQ>
 where
 	ES::Target: EntropySource,
+	MQ::Target: MessageQueue,
 {
 	/// Returns a new instance of [`LSPS0ClientHandler`].
 	pub(crate) fn new(
-		entropy_source: ES, pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
-		pending_events: Arc<EventQueue>,
+		entropy_source: ES, pending_messages: MQ, pending_events: Arc<EventQueue>,
 	) -> Self {
 		Self { entropy_source, pending_messages, pending_events }
 	}
@@ -49,17 +50,13 @@ where
 	/// Please refer to the [LSPS0
 	/// specifcation](https://github.com/BitcoinAndLightningLayerSpecs/lsp/tree/main/LSPS0#lsps-specification-support-query)
 	/// for more information.
-	pub fn list_protocols(&self, counterparty_node_id: PublicKey) {
+	pub fn list_protocols(&self, counterparty_node_id: &PublicKey) {
 		let msg = LSPS0Message::Request(
 			utils::generate_request_id(&self.entropy_source),
 			LSPS0Request::ListProtocols(ListProtocolsRequest {}),
 		);
 
-		self.enqueue_message(counterparty_node_id, msg);
-	}
-
-	fn enqueue_message(&self, counterparty_node_id: PublicKey, message: LSPS0Message) {
-		self.pending_messages.lock().unwrap().push((counterparty_node_id, message.into()));
+		self.pending_messages.enqueue(counterparty_node_id, msg.into());
 	}
 
 	fn handle_response(
@@ -88,9 +85,10 @@ where
 	}
 }
 
-impl<ES: Deref> ProtocolMessageHandler for LSPS0ClientHandler<ES>
+impl<ES: Deref, MQ: Deref> ProtocolMessageHandler for LSPS0ClientHandler<ES, MQ>
 where
 	ES::Target: EntropySource,
+	MQ::Target: MessageQueue,
 {
 	type ProtocolMessage = LSPS0Message;
 	const PROTOCOL_NUMBER: Option<u16> = None;
@@ -119,20 +117,14 @@ mod tests {
 	use alloc::string::ToString;
 	use alloc::sync::Arc;
 
-	use crate::lsps0::msgs::RequestId;
+	use crate::lsps0::msgs::{LSPSMessage, RequestId};
+	use crate::tests::utils::{TestEntropy, TestMessageQueue};
 
 	use super::*;
 
-	struct TestEntropy {}
-	impl EntropySource for TestEntropy {
-		fn get_secure_random_bytes(&self) -> [u8; 32] {
-			[0; 32]
-		}
-	}
-
 	#[test]
 	fn test_list_protocols() {
-		let pending_messages = Arc::new(Mutex::new(vec![]));
+		let pending_messages = Arc::new(TestMessageQueue::new());
 		let entropy_source = Arc::new(TestEntropy {});
 		let event_queue = Arc::new(EventQueue::new());
 
@@ -147,8 +139,8 @@ mod tests {
 		)
 		.unwrap();
 
-		lsps0_handler.list_protocols(counterparty_node_id);
-		let pending_messages = pending_messages.lock().unwrap();
+		lsps0_handler.list_protocols(&counterparty_node_id);
+		let pending_messages = pending_messages.get_and_clear_pending_msgs();
 
 		assert_eq!(pending_messages.len(), 1);
 

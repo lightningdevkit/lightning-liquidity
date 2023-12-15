@@ -16,9 +16,10 @@ use super::msgs::{
 	OrderParams,
 };
 use super::utils::is_valid;
+use crate::message_queue::MessageQueue;
 
 use crate::events::EventQueue;
-use crate::lsps0::msgs::{LSPSMessage, ProtocolMessageHandler, RequestId};
+use crate::lsps0::msgs::{ProtocolMessageHandler, RequestId};
 use crate::prelude::{HashMap, String, ToString, Vec};
 use crate::sync::{Arc, Mutex, RwLock};
 use crate::{events::Event, lsps0::msgs::ResponseError};
@@ -26,7 +27,6 @@ use crate::{events::Event, lsps0::msgs::ResponseError};
 use lightning::chain::Filter;
 use lightning::ln::channelmanager::AChannelManager;
 use lightning::ln::msgs::{ErrorAction, LightningError};
-use lightning::ln::peer_handler::APeerManager;
 use lightning::sign::EntropySource;
 use lightning::util::errors::APIError;
 use lightning::util::logger::Level;
@@ -216,60 +216,43 @@ impl PeerState {
 }
 
 /// The main object allowing to send and receive LSPS1 messages.
-pub struct LSPS1ClientHandler<ES: Deref, CM: Deref + Clone, PM: Deref + Clone, C: Deref>
+pub struct LSPS1ClientHandler<ES: Deref, CM: Deref + Clone, MQ: Deref, C: Deref>
 where
 	ES::Target: EntropySource,
 	CM::Target: AChannelManager,
-	PM::Target: APeerManager,
+	MQ::Target: MessageQueue,
 	C::Target: Filter,
 {
 	entropy_source: ES,
 	channel_manager: CM,
-	peer_manager: Mutex<Option<PM>>,
 	chain_source: Option<C>,
-	pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
+	pending_messages: MQ,
 	pending_events: Arc<EventQueue>,
 	per_peer_state: RwLock<HashMap<PublicKey, Mutex<PeerState>>>,
 	config: LSPS1ClientConfig,
 }
 
-impl<ES: Deref, CM: Deref + Clone, PM: Deref + Clone, C: Deref> LSPS1ClientHandler<ES, CM, PM, C>
+impl<ES: Deref, CM: Deref + Clone, MQ: Deref, C: Deref> LSPS1ClientHandler<ES, CM, MQ, C>
 where
 	ES::Target: EntropySource,
 	CM::Target: AChannelManager,
-	PM::Target: APeerManager,
+	MQ::Target: MessageQueue,
 	C::Target: Filter,
 	ES::Target: EntropySource,
 {
 	pub(crate) fn new(
-		entropy_source: ES, pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
-		pending_events: Arc<EventQueue>, channel_manager: CM, chain_source: Option<C>,
-		config: LSPS1ClientConfig,
+		entropy_source: ES, pending_messages: MQ, pending_events: Arc<EventQueue>,
+		channel_manager: CM, chain_source: Option<C>, config: LSPS1ClientConfig,
 	) -> Self {
 		Self {
 			entropy_source,
 			channel_manager,
-			peer_manager: Mutex::new(None),
 			chain_source,
 			pending_messages,
 			pending_events,
 			per_peer_state: RwLock::new(HashMap::new()),
 			config,
 		}
-	}
-
-	/// Set a [`PeerManager`] reference for the message handler.
-	///
-	/// This allows the message handler to wake the [`PeerManager`] by calling
-	/// [`PeerManager::process_events`] after enqueing messages to be sent.
-	///
-	/// Without this the messages will be sent based on whatever polling interval
-	/// your background processor uses.
-	///
-	/// [`PeerManager`]: lightning::ln::peer_handler::PeerManager
-	/// [`PeerManager::process_events`]: lightning::ln::peer_handler::PeerManager::process_events
-	pub fn set_peer_manager(&self, peer_manager: PM) {
-		*self.peer_manager.lock().unwrap() = Some(peer_manager);
 	}
 
 	fn request_for_info(&self, counterparty_node_id: PublicKey, channel_id: u128) {
@@ -285,17 +268,10 @@ where
 		let request_id = crate::utils::generate_request_id(&self.entropy_source);
 		peer_state_lock.insert_request(request_id.clone(), channel_id);
 
-		{
-			let mut pending_messages = self.pending_messages.lock().unwrap();
-			pending_messages.push((
-				counterparty_node_id,
-				LSPS1Message::Request(request_id, LSPS1Request::GetInfo(GetInfoRequest {})).into(),
-			));
-		}
-
-		if let Some(peer_manager) = self.peer_manager.lock().unwrap().as_ref() {
-			peer_manager.as_ref().process_events();
-		}
+		self.pending_messages.enqueue(
+			&counterparty_node_id,
+			LSPS1Message::Request(request_id, LSPS1Request::GetInfo(GetInfoRequest {})).into(),
+		);
 	}
 
 	fn handle_get_info_response(
@@ -386,20 +362,14 @@ where
 				let request_id = crate::utils::generate_request_id(&self.entropy_source);
 				peer_state_lock.insert_request(request_id.clone(), channel_id);
 
-				{
-					let mut pending_messages = self.pending_messages.lock().unwrap();
-					pending_messages.push((
-						*counterparty_node_id,
-						LSPS1Message::Request(
-							request_id,
-							LSPS1Request::CreateOrder(CreateOrderRequest { order, version }),
-						)
-						.into(),
-					));
-				}
-				if let Some(peer_manager) = self.peer_manager.lock().unwrap().as_ref() {
-					peer_manager.as_ref().process_events();
-				}
+				self.pending_messages.enqueue(
+					counterparty_node_id,
+					LSPS1Message::Request(
+						request_id,
+						LSPS1Request::CreateOrder(CreateOrderRequest { order, version }),
+					)
+					.into(),
+				);
 			}
 			None => {
 				return Err(APIError::APIMisuseError {
@@ -537,22 +507,14 @@ where
 					let request_id = crate::utils::generate_request_id(&self.entropy_source);
 					peer_state_lock.insert_request(request_id.clone(), channel_id);
 
-					{
-						let mut pending_messages = self.pending_messages.lock().unwrap();
-						pending_messages.push((
-							*counterparty_node_id,
-							LSPS1Message::Request(
-								request_id,
-								LSPS1Request::GetOrder(GetOrderRequest {
-									order_id: order_id.clone(),
-								}),
-							)
-							.into(),
-						));
-					}
-					if let Some(peer_manager) = self.peer_manager.lock().unwrap().as_ref() {
-						peer_manager.as_ref().process_events();
-					}
+					self.pending_messages.enqueue(
+						counterparty_node_id,
+						LSPS1Message::Request(
+							request_id,
+							LSPS1Request::GetOrder(GetOrderRequest { order_id: order_id.clone() }),
+						)
+						.into(),
+					);
 				} else {
 					return Err(APIError::APIMisuseError {
 						err: format!("Channel with id {} not found", channel_id),
@@ -647,12 +609,12 @@ where
 	}
 }
 
-impl<ES: Deref, CM: Deref + Clone, PM: Deref + Clone, C: Deref> ProtocolMessageHandler
-	for LSPS1ClientHandler<ES, CM, PM, C>
+impl<ES: Deref, CM: Deref + Clone, MQ: Deref, C: Deref> ProtocolMessageHandler
+	for LSPS1ClientHandler<ES, CM, MQ, C>
 where
 	ES::Target: EntropySource,
 	CM::Target: AChannelManager,
-	PM::Target: APeerManager,
+	MQ::Target: MessageQueue,
 	C::Target: Filter,
 {
 	type ProtocolMessage = LSPS1Message;

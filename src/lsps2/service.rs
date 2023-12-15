@@ -10,16 +10,16 @@
 //! Contains the main LSPS2 server-side object, [`LSPS2ServiceHandler`].
 
 use crate::events::EventQueue;
-use crate::lsps0::msgs::{LSPSMessage, ProtocolMessageHandler, RequestId};
+use crate::lsps0::msgs::{ProtocolMessageHandler, RequestId};
 use crate::lsps2::event::LSPS2ServiceEvent;
 use crate::lsps2::utils::{compute_opening_fee, is_valid_opening_fee_params};
+use crate::message_queue::MessageQueue;
 use crate::prelude::{HashMap, String, ToString, Vec};
 use crate::sync::{Arc, Mutex, RwLock};
 use crate::{events::Event, lsps0::msgs::ResponseError};
 
 use lightning::ln::channelmanager::{AChannelManager, InterceptId};
 use lightning::ln::msgs::{ErrorAction, LightningError};
-use lightning::ln::peer_handler::APeerManager;
 use lightning::ln::ChannelId;
 use lightning::util::errors::APIError;
 use lightning::util::logger::Level;
@@ -260,53 +260,37 @@ impl PeerState {
 }
 
 /// The main object allowing to send and receive LSPS2 messages.
-pub struct LSPS2ServiceHandler<CM: Deref + Clone, PM: Deref>
+pub struct LSPS2ServiceHandler<CM: Deref + Clone, MQ: Deref>
 where
 	CM::Target: AChannelManager,
-	PM::Target: APeerManager,
+	MQ::Target: MessageQueue,
 {
-	peer_manager: Mutex<Option<PM>>,
 	channel_manager: CM,
-	pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
+	pending_messages: MQ,
 	pending_events: Arc<EventQueue>,
 	per_peer_state: RwLock<HashMap<PublicKey, Mutex<PeerState>>>,
 	peer_by_scid: RwLock<HashMap<u64, PublicKey>>,
 	config: LSPS2ServiceConfig,
 }
 
-impl<CM: Deref + Clone, PM: Deref> LSPS2ServiceHandler<CM, PM>
+impl<CM: Deref + Clone, MQ: Deref> LSPS2ServiceHandler<CM, MQ>
 where
 	CM::Target: AChannelManager,
-	PM::Target: APeerManager,
+	MQ::Target: MessageQueue,
 {
 	/// Constructs a `LSPS2ServiceHandler`.
 	pub(crate) fn new(
-		pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
-		pending_events: Arc<EventQueue>, channel_manager: CM, config: LSPS2ServiceConfig,
+		pending_messages: MQ, pending_events: Arc<EventQueue>, channel_manager: CM,
+		config: LSPS2ServiceConfig,
 	) -> Self {
 		Self {
 			pending_messages,
 			pending_events,
 			per_peer_state: RwLock::new(HashMap::new()),
 			peer_by_scid: RwLock::new(HashMap::new()),
-			peer_manager: Mutex::new(None),
 			channel_manager,
 			config,
 		}
-	}
-
-	/// Set a [`PeerManager`] reference for the message handler.
-	///
-	/// This allows the message handler to wake the [`PeerManager`] by calling
-	/// [`PeerManager::process_events`] after enqueing messages to be sent.
-	///
-	/// Without this the messages will be sent based on whatever polling interval
-	/// your background processor uses.
-	///
-	/// [`PeerManager`]: lightning::ln::peer_handler::PeerManager
-	/// [`PeerManager::process_events`]: lightning::ln::peer_handler::PeerManager::process_events
-	pub fn set_peer_manager(&self, peer_manager: PM) {
-		*self.peer_manager.lock().unwrap() = Some(peer_manager);
 	}
 
 	/// Used by LSP to inform a client requesting a JIT Channel the token they used is invalid.
@@ -315,11 +299,11 @@ where
 	///
 	/// [`LSPS2ServiceEvent::GetInfo`]: crate::lsps2::event::LSPS2ServiceEvent::GetInfo
 	pub fn invalid_token_provided(
-		&self, counterparty_node_id: PublicKey, request_id: RequestId,
+		&self, counterparty_node_id: &PublicKey, request_id: RequestId,
 	) -> Result<(), APIError> {
 		let outer_state_lock = self.per_peer_state.read().unwrap();
 
-		match outer_state_lock.get(&counterparty_node_id) {
+		match outer_state_lock.get(counterparty_node_id) {
 			Some(inner_state_lock) => {
 				let mut peer_state = inner_state_lock.lock().unwrap();
 
@@ -353,12 +337,12 @@ where
 	///
 	/// [`LSPS2ServiceEvent::GetInfo`]: crate::lsps2::event::LSPS2ServiceEvent::GetInfo
 	pub fn opening_fee_params_generated(
-		&self, counterparty_node_id: PublicKey, request_id: RequestId,
+		&self, counterparty_node_id: &PublicKey, request_id: RequestId,
 		opening_fee_params_menu: Vec<RawOpeningFeeParams>,
 	) -> Result<(), APIError> {
 		let outer_state_lock = self.per_peer_state.read().unwrap();
 
-		match outer_state_lock.get(&counterparty_node_id) {
+		match outer_state_lock.get(counterparty_node_id) {
 			Some(inner_state_lock) => {
 				let mut peer_state = inner_state_lock.lock().unwrap();
 
@@ -397,12 +381,12 @@ where
 	///
 	/// [`LSPS2ServiceEvent::BuyRequest`]: crate::lsps2::event::LSPS2ServiceEvent::BuyRequest
 	pub fn invoice_parameters_generated(
-		&self, counterparty_node_id: PublicKey, request_id: RequestId, scid: u64,
+		&self, counterparty_node_id: &PublicKey, request_id: RequestId, scid: u64,
 		cltv_expiry_delta: u32, client_trusts_lsp: bool,
 	) -> Result<(), APIError> {
 		let outer_state_lock = self.per_peer_state.read().unwrap();
 
-		match outer_state_lock.get(&counterparty_node_id) {
+		match outer_state_lock.get(counterparty_node_id) {
 			Some(inner_state_lock) => {
 				let mut peer_state = inner_state_lock.lock().unwrap();
 
@@ -410,7 +394,7 @@ where
 					Some(LSPS2Request::Buy(buy_request)) => {
 						{
 							let mut peer_by_scid = self.peer_by_scid.write().unwrap();
-							peer_by_scid.insert(scid, counterparty_node_id);
+							peer_by_scid.insert(scid, *counterparty_node_id);
 						}
 
 						let outbound_jit_channel = OutboundJITChannel::new(
@@ -566,17 +550,10 @@ where
 	}
 
 	fn enqueue_response(
-		&self, counterparty_node_id: PublicKey, request_id: RequestId, response: LSPS2Response,
+		&self, counterparty_node_id: &PublicKey, request_id: RequestId, response: LSPS2Response,
 	) {
-		{
-			let mut pending_messages = self.pending_messages.lock().unwrap();
-			pending_messages
-				.push((counterparty_node_id, LSPS2Message::Response(request_id, response).into()));
-		}
-
-		if let Some(peer_manager) = self.peer_manager.lock().unwrap().as_ref() {
-			peer_manager.as_ref().process_events();
-		}
+		self.pending_messages
+			.enqueue(counterparty_node_id, LSPS2Message::Response(request_id, response).into());
 	}
 
 	fn enqueue_event(&self, event: Event) {
@@ -587,7 +564,7 @@ where
 		&self, request_id: RequestId, counterparty_node_id: &PublicKey,
 	) -> Result<(), LightningError> {
 		self.enqueue_response(
-			*counterparty_node_id,
+			counterparty_node_id,
 			request_id,
 			LSPS2Response::GetVersions(GetVersionsResponse {
 				versions: SUPPORTED_SPEC_VERSIONS.to_vec(),
@@ -601,7 +578,7 @@ where
 	) -> Result<(), LightningError> {
 		if !SUPPORTED_SPEC_VERSIONS.contains(&params.version) {
 			self.enqueue_response(
-				*counterparty_node_id,
+				counterparty_node_id,
 				request_id,
 				LSPS2Response::GetInfoError(ResponseError {
 					code: LSPS2_GET_INFO_REQUEST_INVALID_VERSION_ERROR_CODE,
@@ -637,7 +614,7 @@ where
 	) -> Result<(), LightningError> {
 		if !SUPPORTED_SPEC_VERSIONS.contains(&params.version) {
 			self.enqueue_response(
-				*counterparty_node_id,
+				counterparty_node_id,
 				request_id,
 				LSPS2Response::BuyError(ResponseError {
 					code: LSPS2_BUY_REQUEST_INVALID_VERSION_ERROR_CODE,
@@ -654,7 +631,7 @@ where
 		if let Some(payment_size_msat) = params.payment_size_msat {
 			if payment_size_msat < self.config.min_payment_size_msat {
 				self.enqueue_response(
-					*counterparty_node_id,
+					counterparty_node_id,
 					request_id,
 					LSPS2Response::BuyError(ResponseError {
 						code: LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_SMALL_ERROR_CODE,
@@ -671,7 +648,7 @@ where
 
 			if payment_size_msat > self.config.max_payment_size_msat {
 				self.enqueue_response(
-					*counterparty_node_id,
+					counterparty_node_id,
 					request_id,
 					LSPS2Response::BuyError(ResponseError {
 						code: LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_LARGE_ERROR_CODE,
@@ -694,7 +671,7 @@ where
 				Some(opening_fee) => {
 					if opening_fee >= payment_size_msat {
 						self.enqueue_response(
-							*counterparty_node_id,
+							counterparty_node_id,
 							request_id,
 							LSPS2Response::BuyError(ResponseError {
 								code: LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_SMALL_ERROR_CODE,
@@ -711,7 +688,7 @@ where
 				}
 				None => {
 					self.enqueue_response(
-						*counterparty_node_id,
+						counterparty_node_id,
 						request_id,
 						LSPS2Response::BuyError(ResponseError {
 							code: LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_LARGE_ERROR_CODE,
@@ -731,7 +708,7 @@ where
 
 		if !is_valid_opening_fee_params(&params.opening_fee_params, &self.config.promise_secret) {
 			self.enqueue_response(
-				*counterparty_node_id,
+				counterparty_node_id,
 				request_id,
 				LSPS2Response::BuyError(ResponseError {
 					code: LSPS2_BUY_REQUEST_INVALID_OPENING_FEE_PARAMS_ERROR_CODE,
@@ -765,10 +742,10 @@ where
 	}
 }
 
-impl<CM: Deref + Clone, PM: Deref> ProtocolMessageHandler for LSPS2ServiceHandler<CM, PM>
+impl<CM: Deref + Clone, MQ: Deref> ProtocolMessageHandler for LSPS2ServiceHandler<CM, MQ>
 where
 	CM::Target: AChannelManager,
-	PM::Target: APeerManager,
+	MQ::Target: MessageQueue,
 {
 	type ProtocolMessage = LSPS2Message;
 	const PROTOCOL_NUMBER: Option<u16> = Some(2);
