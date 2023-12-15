@@ -4,6 +4,8 @@
 //! specifcation](https://github.com/BitcoinAndLightningLayerSpecs/lsp/tree/main/LSPS0) for more
 //! information.
 
+use crate::events::{Event, EventQueue};
+use crate::lsps0::event::LSPS0ClientEvent;
 use crate::lsps0::msgs::{
 	LSPS0Message, LSPS0Request, LSPS0Response, LSPSMessage, ListProtocolsRequest,
 	ListProtocolsResponse, ProtocolMessageHandler, ResponseError,
@@ -27,6 +29,7 @@ where
 {
 	entropy_source: ES,
 	pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
+	pending_events: Arc<EventQueue>,
 }
 
 impl<ES: Deref> LSPS0ClientHandler<ES>
@@ -36,8 +39,9 @@ where
 	/// Returns a new instance of [`LSPS0ClientHandler`].
 	pub(crate) fn new(
 		entropy_source: ES, pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
+		pending_events: Arc<EventQueue>,
 	) -> Self {
-		Self { entropy_source, pending_messages }
+		Self { entropy_source, pending_messages, pending_events }
 	}
 
 	/// Calls LSPS0's `list_protocols`.
@@ -59,10 +63,18 @@ where
 	}
 
 	fn handle_response(
-		&self, response: LSPS0Response, _counterparty_node_id: &PublicKey,
+		&self, response: LSPS0Response, counterparty_node_id: &PublicKey,
 	) -> Result<(), LightningError> {
 		match response {
-			LSPS0Response::ListProtocols(ListProtocolsResponse { protocols: _ }) => Ok(()),
+			LSPS0Response::ListProtocols(ListProtocolsResponse { protocols }) => {
+				self.pending_events.enqueue(Event::LSPS0Client(
+					LSPS0ClientEvent::ListProtocolsResponse {
+						counterparty_node_id: *counterparty_node_id,
+						protocols,
+					},
+				));
+				Ok(())
+			}
 			LSPS0Response::ListProtocolsError(ResponseError { code, message, data, .. }) => {
 				Err(LightningError {
 					err: format!(
@@ -121,9 +133,14 @@ mod tests {
 	#[test]
 	fn test_list_protocols() {
 		let pending_messages = Arc::new(Mutex::new(vec![]));
+		let entropy_source = Arc::new(TestEntropy {});
+		let event_queue = Arc::new(EventQueue::new());
 
-		let lsps0_handler =
-			Arc::new(LSPS0ClientHandler::new(Arc::new(TestEntropy {}), pending_messages.clone()));
+		let lsps0_handler = Arc::new(LSPS0ClientHandler::new(
+			entropy_source,
+			Arc::clone(&pending_messages),
+			event_queue,
+		));
 
 		let counterparty_node_id = utils::parse_pubkey(
 			"027100442c3b79f606f80f322d98d499eefcb060599efc5d4ecb00209c2cb54190",

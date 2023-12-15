@@ -9,12 +9,11 @@
 
 //! Contains the main LSPS2 client object, [`LSPS2ClientHandler`].
 
-use crate::events::EventQueue;
-use crate::lsps0::msgs::{LSPSMessage, ProtocolMessageHandler, RequestId};
+use crate::events::{Event, EventQueue};
+use crate::lsps0::msgs::{LSPSMessage, ProtocolMessageHandler, RequestId, ResponseError};
 use crate::lsps2::event::LSPS2ClientEvent;
 use crate::prelude::{HashMap, String, ToString, Vec};
 use crate::sync::{Arc, Mutex, RwLock};
-use crate::{events::Event, lsps0::msgs::ResponseError};
 
 use lightning::ln::msgs::{ErrorAction, LightningError};
 use lightning::ln::peer_handler::APeerManager;

@@ -15,6 +15,7 @@
 //!
 //! [`LiquidityManager::get_and_clear_pending_events`]: crate::LiquidityManager::get_and_clear_pending_events
 
+use crate::lsps0;
 #[cfg(lsps1)]
 use crate::lsps1;
 use crate::lsps2;
@@ -78,6 +79,8 @@ impl EventQueue {
 /// An event which you should probably take some action in response to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
+	/// An LSPS0 client event.
+	LSPS0Client(lsps0::event::LSPS0ClientEvent),
 	/// An LSPS1 (Channel Request) client event.
 	#[cfg(lsps1)]
 	LSPS1Client(lsps1::event::LSPS1ClientEvent),

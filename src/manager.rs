@@ -126,8 +126,11 @@ where {
 		let pending_messages = Arc::new(Mutex::new(vec![]));
 		let pending_events = Arc::new(EventQueue::new());
 
-		let lsps0_client_handler =
-			LSPS0ClientHandler::new(entropy_source.clone(), Arc::clone(&pending_messages));
+		let lsps0_client_handler = LSPS0ClientHandler::new(
+			entropy_source.clone(),
+			Arc::clone(&pending_messages),
+			Arc::clone(&pending_events),
+		);
 
 		let lsps0_service_handler = if service_config.is_some() {
 			Some(LSPS0ServiceHandler::new(vec![], Arc::clone(&pending_messages)))
