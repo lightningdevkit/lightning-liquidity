@@ -10,8 +10,7 @@
 //! Contains the main LSPS2 server-side object, [`LSPS2ServiceHandler`].
 
 use crate::events::EventQueue;
-use crate::lsps0::message_handler::ProtocolMessageHandler;
-use crate::lsps0::msgs::{LSPSMessage, RequestId};
+use crate::lsps0::msgs::{LSPSMessage, ProtocolMessageHandler, RequestId};
 use crate::lsps2::event::LSPS2ServiceEvent;
 use crate::lsps2::utils::{compute_opening_fee, is_valid_opening_fee_params};
 use crate::prelude::{HashMap, String, ToString, Vec};

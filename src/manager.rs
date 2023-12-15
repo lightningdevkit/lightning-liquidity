@@ -1,7 +1,9 @@
 use crate::events::{Event, EventQueue};
-use crate::lsps0::message_handler::LSPS0MessageHandler;
-use crate::lsps0::message_handler::ProtocolMessageHandler;
-use crate::lsps0::msgs::{LSPSMessage, RawLSPSMessage, LSPS_MESSAGE_TYPE_ID};
+use crate::lsps0::client::LSPS0ClientHandler;
+use crate::lsps0::msgs::{
+	LSPS0Message, LSPSMessage, ProtocolMessageHandler, RawLSPSMessage, LSPS_MESSAGE_TYPE_ID,
+};
+use crate::lsps0::service::LSPS0ServiceHandler;
 
 #[cfg(lsps1)]
 use crate::lsps1::client::{LSPS1ClientConfig, LSPS1ClientHandler};
@@ -89,7 +91,8 @@ pub struct LiquidityManager<
 	pending_messages: Arc<Mutex<Vec<(PublicKey, LSPSMessage)>>>,
 	pending_events: Arc<EventQueue>,
 	request_id_to_method_map: Mutex<HashMap<String, String>>,
-	lsps0_message_handler: LSPS0MessageHandler<ES>,
+	lsps0_client_handler: LSPS0ClientHandler<ES>,
+	lsps0_service_handler: Option<LSPS0ServiceHandler>,
 	#[cfg(lsps1)]
 	lsps1_service_handler: Option<LSPS1ServiceHandler<ES, CM, PM, C>>,
 	#[cfg(lsps1)]
@@ -123,11 +126,14 @@ where {
 		let pending_messages = Arc::new(Mutex::new(vec![]));
 		let pending_events = Arc::new(EventQueue::new());
 
-		let lsps0_message_handler = LSPS0MessageHandler::new(
-			entropy_source.clone().clone(),
-			vec![],
-			Arc::clone(&pending_messages),
-		);
+		let lsps0_client_handler =
+			LSPS0ClientHandler::new(entropy_source.clone(), Arc::clone(&pending_messages));
+
+		let lsps0_service_handler = if service_config.is_some() {
+			Some(LSPS0ServiceHandler::new(vec![], Arc::clone(&pending_messages)))
+		} else {
+			None
+		};
 
 		let lsps2_client_handler = client_config.as_ref().and_then(|config| {
 			config.lsps2_client_config.map(|config| {
@@ -182,7 +188,8 @@ where {
 			pending_messages,
 			pending_events,
 			request_id_to_method_map: Mutex::new(HashMap::new()),
-			lsps0_message_handler,
+			lsps0_client_handler,
+			lsps0_service_handler,
 			#[cfg(lsps1)]
 			lsps1_client_handler,
 			#[cfg(lsps1)]
@@ -196,9 +203,14 @@ where {
 		}
 	}
 
-	/// Returns a reference to the LSPS0 message handler.
-	pub fn lsps0_message_handler(&self) -> &LSPS0MessageHandler<ES> {
-		&self.lsps0_message_handler
+	/// Returns a reference to the LSPS0 client-side handler.
+	pub fn lsps0_client_handler(&self) -> &LSPS0ClientHandler<ES> {
+		&self.lsps0_client_handler
+	}
+
+	/// Returns a reference to the LSPS0 server-side handler.
+	pub fn lsps0_service_handler(&self) -> Option<&LSPS0ServiceHandler> {
+		self.lsps0_service_handler.as_ref()
 	}
 
 	/// Returns a reference to the LSPS1 client-side handler.
@@ -279,8 +291,18 @@ where {
 			LSPSMessage::Invalid => {
 				return Err(LightningError { err: format!("{} did not understand a message we previously sent, maybe they don't support a protocol we are trying to use?", sender_node_id), action: ErrorAction::IgnoreAndLog(Level::Error)});
 			}
-			LSPSMessage::LSPS0(msg) => {
-				self.lsps0_message_handler.handle_message(msg, sender_node_id)?;
+			LSPSMessage::LSPS0(msg @ LSPS0Message::Response(..)) => {
+				self.lsps0_client_handler.handle_message(msg, sender_node_id)?;
+			}
+			LSPSMessage::LSPS0(msg @ LSPS0Message::Request(..)) => {
+				match &self.lsps0_service_handler {
+					Some(lsps0_service_handler) => {
+						lsps0_service_handler.handle_message(msg, sender_node_id)?;
+					}
+					None => {
+						return Err(LightningError { err: format!("Received LSPS0 request message without LSPS0 service handler configured. From node = {:?}", sender_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
+					}
+				}
 			}
 			#[cfg(lsps1)]
 			LSPSMessage::LSPS1(msg @ LSPS1Message::Response(..)) => match &self.lsps1_client_handler {

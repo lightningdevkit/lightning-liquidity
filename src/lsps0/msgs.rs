@@ -14,7 +14,10 @@ use crate::lsps2::msgs::{
 use crate::prelude::{HashMap, String, ToString, Vec};
 
 use lightning::impl_writeable_msg;
+use lightning::ln::msgs::LightningError;
 use lightning::ln::wire;
+
+use bitcoin::secp256k1::PublicKey;
 
 use serde::de;
 use serde::de::{MapAccess, Visitor};
@@ -39,6 +42,19 @@ const LSPS0_LISTPROTOCOLS_METHOD_NAME: &str = "lsps0.list_protocols";
 
 /// The Lightning message type id for LSPS messages.
 pub const LSPS_MESSAGE_TYPE_ID: u16 = 37913;
+
+/// A trait used to implement a specific LSPS protocol.
+///
+/// The messages the protocol uses need to be able to be mapped
+/// from and into [`LSPSMessage`].
+pub(crate) trait ProtocolMessageHandler {
+	type ProtocolMessage: TryFrom<LSPSMessage> + Into<LSPSMessage>;
+	const PROTOCOL_NUMBER: Option<u16>;
+
+	fn handle_message(
+		&self, message: Self::ProtocolMessage, counterparty_node_id: &PublicKey,
+	) -> Result<(), LightningError>;
+}
 
 /// Lightning message type used by LSPS protocols.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
