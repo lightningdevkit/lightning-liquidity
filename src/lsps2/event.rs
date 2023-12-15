@@ -126,7 +126,9 @@ pub enum LSPS2ServiceEvent {
 		amt_to_forward_msat: u64,
 		/// The fee earned for opening the channel.
 		opening_fee_msat: u64,
-		/// An internal id used to track channel open.
+		/// A user specified id used to track channel open.
 		user_channel_id: u128,
+		/// The short channel id to use in the route hint.
+		scid: u64,
 	},
 }

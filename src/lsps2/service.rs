@@ -26,7 +26,6 @@ use lightning::util::logger::Level;
 
 use bitcoin::secp256k1::PublicKey;
 
-use core::convert::TryInto;
 use core::ops::Deref;
 
 use crate::lsps2::msgs::{
@@ -180,17 +179,19 @@ struct OutboundJITChannel {
 	scid: u64,
 	cltv_expiry_delta: u32,
 	client_trusts_lsp: bool,
+	user_channel_id: u128,
 }
 
 impl OutboundJITChannel {
 	fn new(
 		scid: u64, cltv_expiry_delta: u32, client_trusts_lsp: bool, payment_size_msat: Option<u64>,
-		opening_fee_params: OpeningFeeParams,
+		opening_fee_params: OpeningFeeParams, user_channel_id: u128,
 	) -> Self {
 		Self {
 			scid,
 			cltv_expiry_delta,
 			client_trusts_lsp,
+			user_channel_id,
 			state: OutboundJITChannelState::new(payment_size_msat, opening_fee_params),
 		}
 	}
@@ -240,6 +241,7 @@ impl OutboundJITChannel {
 
 struct PeerState {
 	outbound_channels_by_scid: HashMap<u64, OutboundJITChannel>,
+	scid_by_user_channel_id: HashMap<u128, u64>,
 	pending_requests: HashMap<RequestId, LSPS2Request>,
 }
 
@@ -247,7 +249,8 @@ impl PeerState {
 	fn new() -> Self {
 		let outbound_channels_by_scid = HashMap::new();
 		let pending_requests = HashMap::new();
-		Self { outbound_channels_by_scid, pending_requests }
+		let scid_by_user_channel_id = HashMap::new();
+		Self { outbound_channels_by_scid, pending_requests, scid_by_user_channel_id }
 	}
 
 	fn insert_outbound_channel(&mut self, scid: u64, channel: OutboundJITChannel) {
@@ -382,7 +385,7 @@ where
 	/// [`LSPS2ServiceEvent::BuyRequest`]: crate::lsps2::event::LSPS2ServiceEvent::BuyRequest
 	pub fn invoice_parameters_generated(
 		&self, counterparty_node_id: &PublicKey, request_id: RequestId, scid: u64,
-		cltv_expiry_delta: u32, client_trusts_lsp: bool,
+		cltv_expiry_delta: u32, client_trusts_lsp: bool, user_channel_id: u128,
 	) -> Result<(), APIError> {
 		let outer_state_lock = self.per_peer_state.read().unwrap();
 
@@ -403,8 +406,10 @@ where
 							client_trusts_lsp,
 							buy_request.payment_size_msat,
 							buy_request.opening_fee_params,
+							user_channel_id,
 						);
 
+						peer_state.scid_by_user_channel_id.insert(user_channel_id, scid);
 						peer_state.insert_outbound_channel(scid, outbound_jit_channel);
 
 						self.enqueue_response(
@@ -460,7 +465,8 @@ where
 										their_network_key: counterparty_node_id.clone(),
 										amt_to_forward_msat,
 										opening_fee_msat,
-										user_channel_id: scid as u128,
+										user_channel_id: jit_channel.user_channel_id,
+										scid,
 									},
 								));
 							}
@@ -496,11 +502,13 @@ where
 	pub fn channel_ready(
 		&self, user_channel_id: u128, channel_id: &ChannelId, counterparty_node_id: &PublicKey,
 	) -> Result<(), APIError> {
-		if let Ok(scid) = user_channel_id.try_into() {
-			let outer_state_lock = self.per_peer_state.read().unwrap();
-			match outer_state_lock.get(counterparty_node_id) {
-				Some(inner_state_lock) => {
-					let mut peer_state = inner_state_lock.lock().unwrap();
+		let outer_state_lock = self.per_peer_state.read().unwrap();
+		match outer_state_lock.get(counterparty_node_id) {
+			Some(inner_state_lock) => {
+				let mut peer_state = inner_state_lock.lock().unwrap();
+				if let Some(scid) =
+					peer_state.scid_by_user_channel_id.get(&user_channel_id).copied()
+				{
 					if let Some(jit_channel) = peer_state.outbound_channels_by_scid.get_mut(&scid) {
 						match jit_channel.channel_ready() {
 							Ok((htlcs, total_amt_to_forward_msat)) => {
@@ -537,12 +545,19 @@ where
 							),
 						});
 					}
-				}
-				None => {
+				} else {
 					return Err(APIError::APIMisuseError {
-						err: format!("No counterparty state for: {}", counterparty_node_id),
+						err: format!(
+							"Could not find a channel with that user_channel_id {}",
+							user_channel_id
+						),
 					});
 				}
+			}
+			None => {
+				return Err(APIError::APIMisuseError {
+					err: format!("No counterparty state for: {}", counterparty_node_id),
+				});
 			}
 		}
 
