@@ -9,6 +9,7 @@
 
 //! Types and primitives that implement the LSPS0: Transport Layer specification.
 
-pub mod message_handler;
+pub mod client;
+pub mod event;
 pub mod msgs;
-pub mod protocol;
+pub mod service;

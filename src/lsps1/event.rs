@@ -1,61 +1,73 @@
-#![allow(missing_docs)]
+//! Contains LSPS1 event types
 
-use super::msgs::{ChannelInfo, OptionsSupported, Order, OrderId, Payment};
+use super::msgs::{ChannelInfo, OptionsSupported, OrderId, OrderParams, OrderPayment};
 
 use crate::lsps0::msgs::RequestId;
 use crate::prelude::String;
 
 use bitcoin::secp256k1::PublicKey;
 
-/// An "Event" which you should probably take some action in response to.
+/// An event which an LSPS1 client should take some action in response to.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Event {
+pub enum LSPS1ClientEvent {
+	/// TODO
 	GetInfoResponse {
+		/// TODO
 		id: u128,
+		/// TODO
 		request_id: RequestId,
+		/// TODO
 		counterparty_node_id: PublicKey,
+		/// TODO
 		version: u16,
+		/// TODO
 		website: String,
+		/// TODO
 		options_supported: OptionsSupported,
 	},
-
-	CreateInvoice {
-		request_id: RequestId,
-		counterparty_node_id: PublicKey,
-		order: Order,
-	},
-
+	/// TODO
 	DisplayOrder {
+		/// TODO
 		id: u128,
+		/// TODO
 		counterparty_node_id: PublicKey,
-		order: Order,
-		payment: Payment,
+		/// TODO
+		order: OrderParams,
+		/// TODO
+		payment: OrderPayment,
+		/// TODO
 		channel: Option<ChannelInfo>,
 	},
+}
 
-	PayforChannel {
+/// An event which an LSPS1 server should take some action in response to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LSPS1ServiceEvent {
+	/// TODO
+	CreateInvoice {
+		/// TODO
 		request_id: RequestId,
+		/// TODO
 		counterparty_node_id: PublicKey,
-		order: Order,
-		payment: Payment,
-		channel: Option<ChannelInfo>,
+		/// TODO
+		order: OrderParams,
 	},
-
+	/// TODO
 	CheckPaymentConfirmation {
+		/// TODO
 		request_id: RequestId,
+		/// TODO
 		counterparty_node_id: PublicKey,
+		/// TODO
 		order_id: OrderId,
 	},
-
-	OpenChannel {
-		request_id: RequestId,
-		counterparty_node_id: PublicKey,
-		order_id: OrderId,
-	},
-
+	/// TODO
 	Refund {
+		/// TODO
 		request_id: RequestId,
+		/// TODO
 		counterparty_node_id: PublicKey,
+		/// TODO
 		order_id: OrderId,
 	},
 }
