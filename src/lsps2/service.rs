@@ -779,67 +779,98 @@ where
 fn calculate_amount_to_forward_per_htlc(
 	htlcs: &[InterceptedHTLC], total_amt_to_forward_msat: u64,
 ) -> Vec<(InterceptId, u64)> {
+	// TODO: we should eventually make sure the HTLCs are all above ChannelDetails::next_outbound_minimum_msat
 	let total_received_msat: u64 =
 		htlcs.iter().map(|htlc| htlc.expected_outbound_amount_msat).sum();
 
-	let mut fee_remaining_msat = total_received_msat - total_amt_to_forward_msat;
-	let total_fee_msat = fee_remaining_msat;
+	match total_received_msat.checked_sub(total_amt_to_forward_msat) {
+		Some(total_fee_msat) => {
+			let mut fee_remaining_msat = total_fee_msat;
 
-	let mut per_htlc_forwards = vec![];
+			let mut per_htlc_forwards = vec![];
 
-	for (index, htlc) in htlcs.iter().enumerate() {
-		let proportional_fee_amt_msat =
-			total_fee_msat * htlc.expected_outbound_amount_msat / total_received_msat;
+			for (index, htlc) in htlcs.iter().enumerate() {
+				let proportional_fee_amt_msat =
+					total_fee_msat * (htlc.expected_outbound_amount_msat / total_received_msat);
 
-		let mut actual_fee_amt_msat = core::cmp::min(fee_remaining_msat, proportional_fee_amt_msat);
-		fee_remaining_msat -= actual_fee_amt_msat;
+				let mut actual_fee_amt_msat =
+					core::cmp::min(fee_remaining_msat, proportional_fee_amt_msat);
+				fee_remaining_msat -= actual_fee_amt_msat;
 
-		if index == htlcs.len() - 1 {
-			actual_fee_amt_msat += fee_remaining_msat;
+				if index == htlcs.len() - 1 {
+					actual_fee_amt_msat += fee_remaining_msat;
+				}
+
+				let amount_to_forward_msat =
+					htlc.expected_outbound_amount_msat.saturating_sub(actual_fee_amt_msat);
+
+				per_htlc_forwards.push((htlc.intercept_id, amount_to_forward_msat))
+			}
+
+			per_htlc_forwards
 		}
-
-		let amount_to_forward_msat = htlc.expected_outbound_amount_msat - actual_fee_amt_msat;
-
-		per_htlc_forwards.push((htlc.intercept_id, amount_to_forward_msat))
+		None => Vec::new(),
 	}
-
-	per_htlc_forwards
 }
 
 #[cfg(test)]
 mod tests {
 
 	use super::*;
+	use proptest::prelude::*;
 
-	#[test]
-	fn test_calculate_amount_to_forward() {
-		// TODO: Use proptest to generate random allocations
-		let htlcs = vec![
-			InterceptedHTLC {
-				intercept_id: InterceptId([0; 32]),
-				expected_outbound_amount_msat: 1000,
-			},
-			InterceptedHTLC {
-				intercept_id: InterceptId([1; 32]),
-				expected_outbound_amount_msat: 2000,
-			},
-			InterceptedHTLC {
-				intercept_id: InterceptId([2; 32]),
-				expected_outbound_amount_msat: 3000,
-			},
-		];
+	const MAX_VALUE_MSAT: u64 = 21_000_000_0000_0000_000;
 
-		let total_amt_to_forward_msat = 5000;
+	fn arb_forward_amounts() -> impl Strategy<Value = (u64, u64, u64, u64)> {
+		(1u64..MAX_VALUE_MSAT, 1u64..MAX_VALUE_MSAT, 1u64..MAX_VALUE_MSAT, 1u64..MAX_VALUE_MSAT)
+			.prop_map(|(a, b, c, d)| {
+				(a, b, c, core::cmp::min(d, a.saturating_add(b).saturating_add(c)))
+			})
+	}
 
-		let result = calculate_amount_to_forward_per_htlc(&htlcs, total_amt_to_forward_msat);
+	proptest! {
+		#[test]
+		fn test_calculate_amount_to_forward((o_0, o_1, o_2, total_amt_to_forward_msat) in arb_forward_amounts()) {
+			let htlcs = vec![
+				InterceptedHTLC {
+					intercept_id: InterceptId([0; 32]),
+					expected_outbound_amount_msat: o_0
+				},
+				InterceptedHTLC {
+					intercept_id: InterceptId([1; 32]),
+					expected_outbound_amount_msat: o_1
+				},
+				InterceptedHTLC {
+					intercept_id: InterceptId([2; 32]),
+					expected_outbound_amount_msat: o_2
+				},
+			];
 
-		assert_eq!(result[0].0, htlcs[0].intercept_id);
-		assert_eq!(result[0].1, 834);
+			let result = calculate_amount_to_forward_per_htlc(&htlcs, total_amt_to_forward_msat);
+			let total_received_msat = o_0 + o_1 + o_2;
 
-		assert_eq!(result[1].0, htlcs[1].intercept_id);
-		assert_eq!(result[1].1, 1667);
+			if total_received_msat < total_amt_to_forward_msat {
+				assert_eq!(result.len(), 0);
+			} else {
+				assert_ne!(result.len(), 0);
+				assert_eq!(result[0].0, htlcs[0].intercept_id);
+				assert_eq!(result[1].0, htlcs[1].intercept_id);
+				assert_eq!(result[2].0, htlcs[2].intercept_id);
+				assert!(result[0].1 <= o_0);
+				assert!(result[1].1 <= o_1);
+				assert!(result[2].1 <= o_2);
 
-		assert_eq!(result[2].0, htlcs[2].intercept_id);
-		assert_eq!(result[2].1, 2499);
+				let result_sum = result.iter().map(|(_, f)| f).sum::<u64>();
+				assert!(result_sum >= total_amt_to_forward_msat);
+				let five_pct = result_sum as f32 * 0.1;
+				let fair_share_0 = ((o_0 as f32 / total_received_msat as f32) * result_sum as f32).max(o_0 as f32);
+				assert!(result[0].1 as f32 <= fair_share_0 + five_pct);
+				let fair_share_1 = ((o_1 as f32 / total_received_msat as f32) * result_sum as f32).max(o_1 as f32);
+				assert!(result[1].1 as f32 <= fair_share_1 + five_pct);
+				let fair_share_2 = ((o_2 as f32 / total_received_msat as f32) * result_sum as f32).max(o_2 as f32);
+				assert!(result[2].1 as f32 <= fair_share_2 + five_pct);
+			}
+
+		}
 	}
 }
