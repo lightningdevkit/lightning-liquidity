@@ -69,7 +69,7 @@ impl RawOpeningFeeParams {
 		hmac.input(self.valid_until.to_rfc3339().as_bytes());
 		hmac.input(&self.min_lifetime.to_be_bytes());
 		hmac.input(&self.max_client_to_self_delay.to_be_bytes());
-		let promise_bytes = Hmac::from_engine(hmac).into_inner();
+		let promise_bytes = Hmac::from_engine(hmac).to_byte_array();
 		let promise = utils::hex_str(&promise_bytes[..]);
 		OpeningFeeParams {
 			min_fee_msat: self.min_fee_msat,
