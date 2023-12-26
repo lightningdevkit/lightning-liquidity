@@ -221,6 +221,7 @@ where
 	C::Target: Filter,
 	ES::Target: EntropySource,
 {
+	/// Constructs an `LSPS1ClientHandler`.
 	pub(crate) fn new(
 		entropy_source: ES, pending_messages: Arc<MessageQueue>, pending_events: Arc<EventQueue>,
 		channel_manager: CM, chain_source: Option<C>, config: LSPS1ClientConfig,
@@ -236,7 +237,14 @@ where
 		}
 	}
 
-	fn request_for_info(&self, counterparty_node_id: PublicKey, channel_id: u128) {
+	/// Initiate the creation of an invoice that when paid will open a channel
+	/// with enough inbound liquidity to be able to receive the payment.
+	///
+	/// `counterparty_node_id` is the node_id of the LSP you would like to use.
+	///
+	/// `token` is an optional String that will be provided to the LSP.
+	/// It can be used by the LSP as an API key, coupon code, or some other way to identify a user.
+	pub fn request_for_info(&self, counterparty_node_id: PublicKey, channel_id: u128) {
 		let channel = InboundCRChannel::new(channel_id);
 
 		let mut outer_state_lock = self.per_peer_state.write().unwrap();
@@ -313,7 +321,14 @@ where
 		Ok(())
 	}
 
-	fn place_order(
+	/// Used by client to place an order to LSP with the provided parameters.
+	/// The client agrees to paying an channel fees as per requested by
+	/// the LSP.
+	///
+	/// Should be called in response to receiving a [`LSPS1ClientEvent::GetInfoResponse`] event.
+	///
+	/// [`LSPS1ClientEvent::GetInfoResponse`]: crate::lsps1::event::LSPS1ClientEvent::GetInfoResponse
+	pub fn place_order(
 		&self, channel_id: u128, counterparty_node_id: &PublicKey, order: OrderParams,
 	) -> Result<(), APIError> {
 		let outer_state_lock = self.per_peer_state.write().unwrap();
@@ -466,6 +481,11 @@ where
 		}
 	}
 
+	/// Used by client to check whether payment is received by LSP and status of order.
+	///
+	/// Should be called in response to receiving a [`LSPS1ClientEvent::DisplayOrder`] event.
+	///
+	/// [`LSPS1ClientEvent::DisplayOrder`]: crate::lsps1::event::LSPS1ClientEvent::DisplayOrder
 	fn check_order_status(
 		&self, counterparty_node_id: &PublicKey, order_id: OrderId, channel_id: u128,
 	) -> Result<(), APIError> {
