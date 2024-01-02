@@ -176,7 +176,7 @@ impl OutboundJITChannelState {
 
 struct OutboundJITChannel {
 	state: OutboundJITChannelState,
-	scid: u64,
+	intercept_scid: u64,
 	cltv_expiry_delta: u32,
 	client_trusts_lsp: bool,
 	user_channel_id: u128,
@@ -184,11 +184,12 @@ struct OutboundJITChannel {
 
 impl OutboundJITChannel {
 	fn new(
-		scid: u64, cltv_expiry_delta: u32, client_trusts_lsp: bool, payment_size_msat: Option<u64>,
-		opening_fee_params: OpeningFeeParams, user_channel_id: u128,
+		intercept_scid: u64, cltv_expiry_delta: u32, client_trusts_lsp: bool,
+		payment_size_msat: Option<u64>, opening_fee_params: OpeningFeeParams,
+		user_channel_id: u128,
 	) -> Self {
 		Self {
-			scid,
+			intercept_scid,
 			cltv_expiry_delta,
 			client_trusts_lsp,
 			user_channel_id,
@@ -240,25 +241,29 @@ impl OutboundJITChannel {
 }
 
 struct PeerState {
-	outbound_channels_by_scid: HashMap<u64, OutboundJITChannel>,
-	scid_by_user_channel_id: HashMap<u128, u64>,
+	outbound_channels_by_intercept_scid: HashMap<u64, OutboundJITChannel>,
+	intercept_scid_by_user_channel_id: HashMap<u128, u64>,
 	pending_requests: HashMap<RequestId, LSPS2Request>,
 }
 
 impl PeerState {
 	fn new() -> Self {
-		let outbound_channels_by_scid = HashMap::new();
+		let outbound_channels_by_intercept_scid = HashMap::new();
 		let pending_requests = HashMap::new();
-		let scid_by_user_channel_id = HashMap::new();
-		Self { outbound_channels_by_scid, pending_requests, scid_by_user_channel_id }
+		let intercept_scid_by_user_channel_id = HashMap::new();
+		Self {
+			outbound_channels_by_intercept_scid,
+			pending_requests,
+			intercept_scid_by_user_channel_id,
+		}
 	}
 
-	fn insert_outbound_channel(&mut self, scid: u64, channel: OutboundJITChannel) {
-		self.outbound_channels_by_scid.insert(scid, channel);
+	fn insert_outbound_channel(&mut self, intercept_scid: u64, channel: OutboundJITChannel) {
+		self.outbound_channels_by_intercept_scid.insert(intercept_scid, channel);
 	}
 
-	fn remove_outbound_channel(&mut self, scid: u64) {
-		self.outbound_channels_by_scid.remove(&scid);
+	fn remove_outbound_channel(&mut self, intercept_scid: u64) {
+		self.outbound_channels_by_intercept_scid.remove(&intercept_scid);
 	}
 }
 
@@ -272,7 +277,7 @@ where
 	pending_messages: MQ,
 	pending_events: Arc<EventQueue>,
 	per_peer_state: RwLock<HashMap<PublicKey, Mutex<PeerState>>>,
-	peer_by_scid: RwLock<HashMap<u64, PublicKey>>,
+	peer_by_intercept_scid: RwLock<HashMap<u64, PublicKey>>,
 	config: LSPS2ServiceConfig,
 }
 
@@ -290,7 +295,7 @@ where
 			pending_messages,
 			pending_events,
 			per_peer_state: RwLock::new(HashMap::new()),
-			peer_by_scid: RwLock::new(HashMap::new()),
+			peer_by_intercept_scid: RwLock::new(HashMap::new()),
 			channel_manager,
 			config,
 		}
@@ -378,13 +383,13 @@ where
 		}
 	}
 
-	/// Used by LSP to provide client with the scid and cltv_expiry_delta to use in their invoice.
+	/// Used by LSP to provide client with the intercept scid and cltv_expiry_delta to use in their invoice.
 	///
 	/// Should be called in response to receiving a [`LSPS2ServiceEvent::BuyRequest`] event.
 	///
 	/// [`LSPS2ServiceEvent::BuyRequest`]: crate::lsps2::event::LSPS2ServiceEvent::BuyRequest
 	pub fn invoice_parameters_generated(
-		&self, counterparty_node_id: &PublicKey, request_id: RequestId, scid: u64,
+		&self, counterparty_node_id: &PublicKey, request_id: RequestId, intercept_scid: u64,
 		cltv_expiry_delta: u32, client_trusts_lsp: bool, user_channel_id: u128,
 	) -> Result<(), APIError> {
 		let outer_state_lock = self.per_peer_state.read().unwrap();
@@ -396,12 +401,13 @@ where
 				match peer_state.pending_requests.remove(&request_id) {
 					Some(LSPS2Request::Buy(buy_request)) => {
 						{
-							let mut peer_by_scid = self.peer_by_scid.write().unwrap();
-							peer_by_scid.insert(scid, *counterparty_node_id);
+							let mut peer_by_intercept_scid =
+								self.peer_by_intercept_scid.write().unwrap();
+							peer_by_intercept_scid.insert(intercept_scid, *counterparty_node_id);
 						}
 
 						let outbound_jit_channel = OutboundJITChannel::new(
-							scid,
+							intercept_scid,
 							cltv_expiry_delta,
 							client_trusts_lsp,
 							buy_request.payment_size_msat,
@@ -409,14 +415,16 @@ where
 							user_channel_id,
 						);
 
-						peer_state.scid_by_user_channel_id.insert(user_channel_id, scid);
-						peer_state.insert_outbound_channel(scid, outbound_jit_channel);
+						peer_state
+							.intercept_scid_by_user_channel_id
+							.insert(user_channel_id, intercept_scid);
+						peer_state.insert_outbound_channel(intercept_scid, outbound_jit_channel);
 
 						self.enqueue_response(
 							counterparty_node_id,
 							request_id,
 							LSPS2Response::Buy(BuyResponse {
-								jit_channel_scid: scid.into(),
+								intercept_scid: intercept_scid.into(),
 								lsp_cltv_expiry_delta: cltv_expiry_delta,
 								client_trusts_lsp,
 							}),
@@ -437,26 +445,28 @@ where
 
 	/// Forward [`Event::HTLCIntercepted`] event parameters into this function.
 	///
-	/// Will fail the intercepted HTLC if the scid matches a payment we are expecting
+	/// Will fail the intercepted HTLC if the intercept scid matches a payment we are expecting
 	/// but the payment amount is incorrect or the expiry has passed.
 	///
-	/// Will generate a [`LSPS2ServiceEvent::OpenChannel`] event if the scid matches a payment we are expected
+	/// Will generate a [`LSPS2ServiceEvent::OpenChannel`] event if the intercept scid matches a payment we are expected
 	/// and the payment amount is correct and the offer has not expired.
 	///
-	/// Will do nothing if the scid does not match any of the ones we gave out.
+	/// Will do nothing if the intercept scid does not match any of the ones we gave out.
 	///
 	/// [`Event::HTLCIntercepted`]: lightning::events::Event::HTLCIntercepted
 	/// [`LSPS2ServiceEvent::OpenChannel`]: crate::lsps2::event::LSPS2ServiceEvent::OpenChannel
 	pub fn htlc_intercepted(
-		&self, scid: u64, intercept_id: InterceptId, expected_outbound_amount_msat: u64,
+		&self, intercept_scid: u64, intercept_id: InterceptId, expected_outbound_amount_msat: u64,
 	) -> Result<(), APIError> {
-		let peer_by_scid = self.peer_by_scid.read().unwrap();
-		if let Some(counterparty_node_id) = peer_by_scid.get(&scid) {
+		let peer_by_intercept_scid = self.peer_by_intercept_scid.read().unwrap();
+		if let Some(counterparty_node_id) = peer_by_intercept_scid.get(&intercept_scid) {
 			let outer_state_lock = self.per_peer_state.read().unwrap();
 			match outer_state_lock.get(counterparty_node_id) {
 				Some(inner_state_lock) => {
 					let mut peer_state = inner_state_lock.lock().unwrap();
-					if let Some(jit_channel) = peer_state.outbound_channels_by_scid.get_mut(&scid) {
+					if let Some(jit_channel) =
+						peer_state.outbound_channels_by_intercept_scid.get_mut(&intercept_scid)
+					{
 						let htlc = InterceptedHTLC { intercept_id, expected_outbound_amount_msat };
 						match jit_channel.htlc_intercepted(htlc) {
 							Ok(Some((opening_fee_msat, amt_to_forward_msat))) => {
@@ -466,7 +476,7 @@ where
 										amt_to_forward_msat,
 										opening_fee_msat,
 										user_channel_id: jit_channel.user_channel_id,
-										scid,
+										intercept_scid,
 									},
 								));
 							}
@@ -475,8 +485,10 @@ where
 								self.channel_manager
 									.get_cm()
 									.fail_intercepted_htlc(intercept_id)?;
-								peer_state.outbound_channels_by_scid.remove(&scid);
-								// TODO: cleanup peer_by_scid
+								peer_state
+									.outbound_channels_by_intercept_scid
+									.remove(&intercept_scid);
+								// TODO: cleanup peer_by_intercept_scid
 								return Err(APIError::APIMisuseError { err: e.err });
 							}
 						}
@@ -484,7 +496,7 @@ where
 				}
 				None => {
 					return Err(APIError::APIMisuseError {
-						err: format!("No counterparty found for scid: {}", scid),
+						err: format!("No counterparty found for scid: {}", intercept_scid),
 					});
 				}
 			}
@@ -506,10 +518,12 @@ where
 		match outer_state_lock.get(counterparty_node_id) {
 			Some(inner_state_lock) => {
 				let mut peer_state = inner_state_lock.lock().unwrap();
-				if let Some(scid) =
-					peer_state.scid_by_user_channel_id.get(&user_channel_id).copied()
+				if let Some(intercept_scid) =
+					peer_state.intercept_scid_by_user_channel_id.get(&user_channel_id).copied()
 				{
-					if let Some(jit_channel) = peer_state.outbound_channels_by_scid.get_mut(&scid) {
+					if let Some(jit_channel) =
+						peer_state.outbound_channels_by_intercept_scid.get_mut(&intercept_scid)
+					{
 						match jit_channel.channel_ready() {
 							Ok((htlcs, total_amt_to_forward_msat)) => {
 								let amounts_to_forward_msat = calculate_amount_to_forward_per_htlc(
