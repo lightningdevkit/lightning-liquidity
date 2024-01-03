@@ -52,8 +52,8 @@ pub enum LSPS2ClientEvent {
 	InvoiceGenerationReady {
 		/// The node id of the LSP.
 		counterparty_node_id: PublicKey,
-		/// The short channel id to use in the route hint.
-		scid: u64,
+		/// The intercept short channel id to use in the route hint.
+		intercept_scid: u64,
 		/// The `cltv_expiry_delta` to use in the route hint.
 		cltv_expiry_delta: u32,
 		/// The initial payment size you specified.
@@ -98,7 +98,7 @@ pub enum LSPS2ServiceEvent {
 	/// If `payment_size_msat` is [`Option::Some`] then the payer is allowed to use MPP.
 	/// If `payment_size_msat` is [`Option::None`] then the payer cannot use MPP.
 	///
-	/// You must generate an scid and `cltv_expiry_delta` for them to use
+	/// You must generate an intercept scid and `cltv_expiry_delta` for them to use
 	/// and call [`LSPS2ServiceHandler::invoice_parameters_generated`].
 	///
 	/// [`LSPS2ServiceHandler::invoice_parameters_generated`]: crate::lsps2::service::LSPS2ServiceHandler::invoice_parameters_generated
@@ -126,7 +126,9 @@ pub enum LSPS2ServiceEvent {
 		amt_to_forward_msat: u64,
 		/// The fee earned for opening the channel.
 		opening_fee_msat: u64,
-		/// An internal id used to track channel open.
+		/// A user specified id used to track channel open.
 		user_channel_id: u128,
+		/// The intercept short channel id to use in the route hint.
+		intercept_scid: u64,
 	},
 }

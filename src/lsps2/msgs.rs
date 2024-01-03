@@ -128,9 +128,9 @@ pub struct BuyRequest {
 
 /// A newtype that holds a `short_channel_id` in human readable format of BBBxTTTx000.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct JITChannelScid(String);
+pub struct InterceptScid(String);
 
-impl From<u64> for JITChannelScid {
+impl From<u64> for InterceptScid {
 	fn from(scid: u64) -> Self {
 		let block = utils::block_from_scid(&scid);
 		let tx_index = utils::tx_index_from_scid(&scid);
@@ -140,8 +140,8 @@ impl From<u64> for JITChannelScid {
 	}
 }
 
-impl JITChannelScid {
-	/// Try to convert a [`JITChannelScid`] into a u64 used by LDK.
+impl InterceptScid {
+	/// Try to convert a [`InterceptScid`] into a u64 used by LDK.
 	pub fn to_scid(&self) -> Result<u64, ()> {
 		utils::scid_from_human_readable_string(&self.0)
 	}
@@ -152,8 +152,8 @@ impl JITChannelScid {
 /// Includes information needed to construct an invoice.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct BuyResponse {
-	/// The short channel id used by LSP to identify need to open channel.
-	pub jit_channel_scid: JITChannelScid,
+	/// The intercept short channel id used by LSP to identify need to open channel.
+	pub intercept_scid: InterceptScid,
 	/// The locktime expiry delta the lsp requires.
 	pub lsp_cltv_expiry_delta: u32,
 	/// A flag that indicates who is trusting who.

@@ -27,7 +27,7 @@ use core::ops::Deref;
 
 use crate::lsps2::msgs::{
 	BuyRequest, BuyResponse, GetInfoRequest, GetInfoResponse, GetVersionsRequest,
-	GetVersionsResponse, JITChannelScid, LSPS2Message, LSPS2Request, LSPS2Response,
+	GetVersionsResponse, InterceptScid, LSPS2Message, LSPS2Request, LSPS2Response,
 	OpeningFeeParams,
 };
 
@@ -57,7 +57,7 @@ enum InboundJITChannelState {
 	MenuRequested { version: u16 },
 	PendingMenuSelection { version: u16 },
 	BuyRequested { version: u16 },
-	PendingPayment { client_trusts_lsp: bool, short_channel_id: JITChannelScid },
+	PendingPayment { client_trusts_lsp: bool, intercept_scid: InterceptScid },
 }
 
 impl InboundJITChannelState {
@@ -108,11 +108,11 @@ impl InboundJITChannelState {
 	}
 
 	fn invoice_params_received(
-		&self, client_trusts_lsp: bool, short_channel_id: JITChannelScid,
+		&self, client_trusts_lsp: bool, intercept_scid: InterceptScid,
 	) -> Result<Self, ChannelStateError> {
 		match self {
 			InboundJITChannelState::BuyRequested { .. } => {
-				Ok(InboundJITChannelState::PendingPayment { client_trusts_lsp, short_channel_id })
+				Ok(InboundJITChannelState::PendingPayment { client_trusts_lsp, intercept_scid })
 			}
 			state => Err(ChannelStateError(format!(
 				"Invoice params received when JIT Channel was in state: {:?}",
@@ -167,9 +167,9 @@ impl InboundJITChannel {
 	}
 
 	fn invoice_params_received(
-		&mut self, client_trusts_lsp: bool, jit_channel_scid: JITChannelScid,
+		&mut self, client_trusts_lsp: bool, intercept_scid: InterceptScid,
 	) -> Result<(), LightningError> {
-		self.state = self.state.invoice_params_received(client_trusts_lsp, jit_channel_scid)?;
+		self.state = self.state.invoice_params_received(client_trusts_lsp, intercept_scid)?;
 		Ok(())
 	}
 }
@@ -519,17 +519,17 @@ where
 
 				if let Err(e) = jit_channel.invoice_params_received(
 					result.client_trusts_lsp,
-					result.jit_channel_scid.clone(),
+					result.intercept_scid.clone(),
 				) {
 					peer_state.remove_inbound_channel(jit_channel_id);
 					return Err(e);
 				}
 
-				if let Ok(scid) = result.jit_channel_scid.to_scid() {
+				if let Ok(intercept_scid) = result.intercept_scid.to_scid() {
 					self.pending_events.enqueue(Event::LSPS2Client(
 						LSPS2ClientEvent::InvoiceGenerationReady {
 							counterparty_node_id: *counterparty_node_id,
-							scid,
+							intercept_scid,
 							cltv_expiry_delta: result.lsp_cltv_expiry_delta,
 							payment_size_msat: jit_channel.config.payment_size_msat,
 							client_trusts_lsp: result.client_trusts_lsp,
@@ -539,8 +539,8 @@ where
 				} else {
 					return Err(LightningError {
 						err: format!(
-							"Received buy response with an invalid scid {:?}",
-							result.jit_channel_scid
+							"Received buy response with an invalid intercept scid {:?}",
+							result.intercept_scid
 						),
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					});
