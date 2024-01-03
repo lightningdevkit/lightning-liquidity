@@ -260,27 +260,25 @@ impl PeerState {
 }
 
 /// The main object allowing to send and receive LSPS2 messages.
-pub struct LSPS2ServiceHandler<CM: Deref + Clone, MQ: Deref>
+pub struct LSPS2ServiceHandler<CM: Deref + Clone>
 where
 	CM::Target: AChannelManager,
-	MQ::Target: MessageQueue,
 {
 	channel_manager: CM,
-	pending_messages: MQ,
+	pending_messages: Arc<MessageQueue>,
 	pending_events: Arc<EventQueue>,
 	per_peer_state: RwLock<HashMap<PublicKey, Mutex<PeerState>>>,
 	peer_by_scid: RwLock<HashMap<u64, PublicKey>>,
 	config: LSPS2ServiceConfig,
 }
 
-impl<CM: Deref + Clone, MQ: Deref> LSPS2ServiceHandler<CM, MQ>
+impl<CM: Deref + Clone> LSPS2ServiceHandler<CM>
 where
 	CM::Target: AChannelManager,
-	MQ::Target: MessageQueue,
 {
 	/// Constructs a `LSPS2ServiceHandler`.
 	pub(crate) fn new(
-		pending_messages: MQ, pending_events: Arc<EventQueue>, channel_manager: CM,
+		pending_messages: Arc<MessageQueue>, pending_events: Arc<EventQueue>, channel_manager: CM,
 		config: LSPS2ServiceConfig,
 	) -> Self {
 		Self {
@@ -742,10 +740,9 @@ where
 	}
 }
 
-impl<CM: Deref + Clone, MQ: Deref> ProtocolMessageHandler for LSPS2ServiceHandler<CM, MQ>
+impl<CM: Deref + Clone> ProtocolMessageHandler for LSPS2ServiceHandler<CM>
 where
 	CM::Target: AChannelManager,
-	MQ::Target: MessageQueue,
 {
 	type ProtocolMessage = LSPS2Message;
 	const PROTOCOL_NUMBER: Option<u16> = Some(2);
