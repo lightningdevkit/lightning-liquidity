@@ -20,24 +20,29 @@ use crate::lsps0;
 use crate::lsps1;
 use crate::lsps2;
 use crate::prelude::{Vec, VecDeque};
-use crate::sync::Mutex;
+use crate::sync::{Arc, Mutex};
+
+use core::future::Future;
+use core::task::{Poll, Waker};
 
 pub(crate) struct EventQueue {
-	queue: Mutex<VecDeque<Event>>,
+	queue: Arc<Mutex<VecDeque<Event>>>,
+	waker: Arc<Mutex<Option<Waker>>>,
 	#[cfg(feature = "std")]
 	condvar: std::sync::Condvar,
 }
 
 impl EventQueue {
 	pub fn new() -> Self {
-		let queue = Mutex::new(VecDeque::new());
+		let queue = Arc::new(Mutex::new(VecDeque::new()));
+		let waker = Arc::new(Mutex::new(None));
 		#[cfg(feature = "std")]
 		{
 			let condvar = std::sync::Condvar::new();
-			Self { queue, condvar }
+			Self { queue, waker, condvar }
 		}
 		#[cfg(not(feature = "std"))]
-		Self { queue }
+		Self { queue, waker }
 	}
 
 	pub fn enqueue(&self, event: Event) {
@@ -46,12 +51,19 @@ impl EventQueue {
 			queue.push_back(event);
 		}
 
+		if let Some(waker) = self.waker.lock().unwrap().take() {
+			waker.wake();
+		}
 		#[cfg(feature = "std")]
 		self.condvar.notify_one();
 	}
 
 	pub fn next_event(&self) -> Option<Event> {
 		self.queue.lock().unwrap().pop_front()
+	}
+
+	pub async fn next_event_async(&self) -> Event {
+		EventFuture { event_queue: Arc::clone(&self.queue), waker: Arc::clone(&self.waker) }.await
 	}
 
 	#[cfg(feature = "std")]
@@ -65,6 +77,10 @@ impl EventQueue {
 		drop(queue);
 
 		if should_notify {
+			if let Some(waker) = self.waker.lock().unwrap().take() {
+				waker.wake();
+			}
+
 			self.condvar.notify_one();
 		}
 
@@ -91,4 +107,24 @@ pub enum Event {
 	LSPS2Client(lsps2::event::LSPS2ClientEvent),
 	/// An LSPS2 (JIT Channel) server event.
 	LSPS2Service(lsps2::event::LSPS2ServiceEvent),
+}
+
+struct EventFuture {
+	event_queue: Arc<Mutex<VecDeque<Event>>>,
+	waker: Arc<Mutex<Option<Waker>>>,
+}
+
+impl Future for EventFuture {
+	type Output = Event;
+
+	fn poll(
+		self: core::pin::Pin<&mut Self>, cx: &mut core::task::Context<'_>,
+	) -> core::task::Poll<Self::Output> {
+		if let Some(event) = self.event_queue.lock().unwrap().pop_front() {
+			Poll::Ready(event)
+		} else {
+			*self.waker.lock().unwrap() = Some(cx.waker().clone());
+			Poll::Pending
+		}
+	}
 }

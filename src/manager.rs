@@ -305,6 +305,13 @@ where {
 		self.pending_events.next_event()
 	}
 
+	/// Asynchronously polls the event queue and returns once the next event is ready.
+	///
+	/// Typically you would spawn a thread or task that calls this in a loop.
+	pub async fn next_event_async(&self) -> Event {
+		self.pending_events.next_event_async().await
+	}
+
 	/// Returns and clears all events without blocking.
 	///
 	/// Typically you would spawn a thread or task that calls this in a loop.
