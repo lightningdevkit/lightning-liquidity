@@ -1,3 +1,5 @@
+//! Utilities for implementing the LSPS2 standard.
+
 use crate::lsps2::msgs::OpeningFeeParams;
 use crate::utils;
 
