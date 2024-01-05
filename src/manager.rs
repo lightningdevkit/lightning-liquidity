@@ -4,7 +4,7 @@ use crate::lsps0::msgs::{
 	LSPS0Message, LSPSMessage, ProtocolMessageHandler, RawLSPSMessage, LSPS_MESSAGE_TYPE_ID,
 };
 use crate::lsps0::service::LSPS0ServiceHandler;
-use crate::message_queue::{DefaultMessageQueue, MessageQueue};
+use crate::message_queue::MessageQueue;
 
 #[cfg(lsps1)]
 use crate::lsps1::client::{LSPS1ClientConfig, LSPS1ClientHandler};
@@ -83,17 +83,17 @@ where
 	CM::Target: AChannelManager,
 	C::Target: Filter,
 {
-	pending_messages: Arc<DefaultMessageQueue>,
+	pending_messages: Arc<MessageQueue>,
 	pending_events: Arc<EventQueue>,
 	request_id_to_method_map: Mutex<HashMap<String, String>>,
-	lsps0_client_handler: LSPS0ClientHandler<ES, Arc<DefaultMessageQueue>>,
-	lsps0_service_handler: Option<LSPS0ServiceHandler<Arc<DefaultMessageQueue>>>,
+	lsps0_client_handler: LSPS0ClientHandler<ES>,
+	lsps0_service_handler: Option<LSPS0ServiceHandler>,
 	#[cfg(lsps1)]
-	lsps1_service_handler: Option<LSPS1ServiceHandler<ES, CM, Arc<DefaultMessageQueue>, C>>,
+	lsps1_service_handler: Option<LSPS1ServiceHandler<ES, CM, C>>,
 	#[cfg(lsps1)]
-	lsps1_client_handler: Option<LSPS1ClientHandler<ES, CM, Arc<DefaultMessageQueue>, C>>,
-	lsps2_service_handler: Option<LSPS2ServiceHandler<CM, Arc<DefaultMessageQueue>>>,
-	lsps2_client_handler: Option<LSPS2ClientHandler<ES, Arc<DefaultMessageQueue>>>,
+	lsps1_client_handler: Option<LSPS1ClientHandler<ES, CM, C>>,
+	lsps2_service_handler: Option<LSPS2ServiceHandler<CM>>,
+	lsps2_client_handler: Option<LSPS2ClientHandler<ES>>,
 	service_config: Option<LiquidityServiceConfig>,
 	_client_config: Option<LiquidityClientConfig>,
 	best_block: Option<RwLock<BestBlock>>,
@@ -116,7 +116,7 @@ where
 		client_config: Option<LiquidityClientConfig>,
 	) -> Self
 where {
-		let pending_messages = Arc::new(DefaultMessageQueue::new());
+		let pending_messages = Arc::new(MessageQueue::new());
 		let pending_events = Arc::new(EventQueue::new());
 
 		let lsps0_client_handler = LSPS0ClientHandler::new(
@@ -200,42 +200,34 @@ where {
 	}
 
 	/// Returns a reference to the LSPS0 client-side handler.
-	pub fn lsps0_client_handler(&self) -> &LSPS0ClientHandler<ES, Arc<DefaultMessageQueue>> {
+	pub fn lsps0_client_handler(&self) -> &LSPS0ClientHandler<ES> {
 		&self.lsps0_client_handler
 	}
 
 	/// Returns a reference to the LSPS0 server-side handler.
-	pub fn lsps0_service_handler(&self) -> Option<&LSPS0ServiceHandler<Arc<DefaultMessageQueue>>> {
+	pub fn lsps0_service_handler(&self) -> Option<&LSPS0ServiceHandler> {
 		self.lsps0_service_handler.as_ref()
 	}
 
 	/// Returns a reference to the LSPS1 client-side handler.
 	#[cfg(lsps1)]
-	pub fn lsps1_client_handler(
-		&self,
-	) -> Option<&LSPS1ClientHandler<ES, CM, Arc<DefaultMessageQueue>, C>> {
+	pub fn lsps1_client_handler(&self) -> Option<&LSPS1ClientHandler<ES, CM, C>> {
 		self.lsps1_client_handler.as_ref()
 	}
 
 	/// Returns a reference to the LSPS1 server-side handler.
 	#[cfg(lsps1)]
-	pub fn lsps1_service_handler(
-		&self,
-	) -> Option<&LSPS1ServiceHandler<ES, CM, Arc<DefaultMessageQueue>, C>> {
+	pub fn lsps1_service_handler(&self) -> Option<&LSPS1ServiceHandler<ES, CM, C>> {
 		self.lsps1_service_handler.as_ref()
 	}
 
 	/// Returns a reference to the LSPS2 client-side handler.
-	pub fn lsps2_client_handler(
-		&self,
-	) -> Option<&LSPS2ClientHandler<ES, Arc<DefaultMessageQueue>>> {
+	pub fn lsps2_client_handler(&self) -> Option<&LSPS2ClientHandler<ES>> {
 		self.lsps2_client_handler.as_ref()
 	}
 
 	/// Returns a reference to the LSPS2 server-side handler.
-	pub fn lsps2_service_handler(
-		&self,
-	) -> Option<&LSPS2ServiceHandler<CM, Arc<DefaultMessageQueue>>> {
+	pub fn lsps2_service_handler(&self) -> Option<&LSPS2ServiceHandler<CM>> {
 		self.lsps2_service_handler.as_ref()
 	}
 

@@ -19,29 +19,22 @@ use crate::lsps0::msgs::{
 };
 use crate::message_queue::MessageQueue;
 use crate::prelude::Vec;
+use crate::sync::Arc;
 
 use lightning::ln::msgs::{ErrorAction, LightningError};
 use lightning::util::logger::Level;
 
 use bitcoin::secp256k1::PublicKey;
 
-use core::ops::Deref;
-
 /// The main server-side object allowing to send and receive LSPS0 messages.
-pub struct LSPS0ServiceHandler<MQ: Deref>
-where
-	MQ::Target: MessageQueue,
-{
-	pending_messages: MQ,
+pub struct LSPS0ServiceHandler {
+	pending_messages: Arc<MessageQueue>,
 	protocols: Vec<u16>,
 }
 
-impl<MQ: Deref> LSPS0ServiceHandler<MQ>
-where
-	MQ::Target: MessageQueue,
-{
+impl LSPS0ServiceHandler {
 	/// Returns a new instance of [`LSPS0ServiceHandler`].
-	pub(crate) fn new(protocols: Vec<u16>, pending_messages: MQ) -> Self {
+	pub(crate) fn new(protocols: Vec<u16>, pending_messages: Arc<MessageQueue>) -> Self {
 		Self { protocols, pending_messages }
 	}
 
@@ -63,10 +56,7 @@ where
 	}
 }
 
-impl<MQ: Deref> ProtocolMessageHandler for LSPS0ServiceHandler<MQ>
-where
-	MQ::Target: MessageQueue,
-{
+impl ProtocolMessageHandler for LSPS0ServiceHandler {
 	type ProtocolMessage = LSPS0Message;
 	const PROTOCOL_NUMBER: Option<u16> = None;
 
@@ -92,7 +82,6 @@ where
 mod tests {
 
 	use crate::lsps0::msgs::{LSPSMessage, ListProtocolsRequest};
-	use crate::tests::utils::TestMessageQueue;
 	use crate::utils;
 	use alloc::string::ToString;
 	use alloc::sync::Arc;
@@ -102,7 +91,7 @@ mod tests {
 	#[test]
 	fn test_handle_list_protocols_request() {
 		let protocols: Vec<u16> = vec![];
-		let pending_messages = Arc::new(TestMessageQueue::new());
+		let pending_messages = Arc::new(MessageQueue::new());
 
 		let lsps0_handler = Arc::new(LSPS0ServiceHandler::new(protocols, pending_messages.clone()));
 

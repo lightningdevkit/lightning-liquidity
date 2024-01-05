@@ -200,26 +200,24 @@ impl PeerState {
 }
 
 /// The main object allowing to send and receive LSPS2 messages.
-pub struct LSPS2ClientHandler<ES: Deref, MQ: Deref>
+pub struct LSPS2ClientHandler<ES: Deref>
 where
 	ES::Target: EntropySource,
-	MQ::Target: MessageQueue,
 {
 	entropy_source: ES,
-	pending_messages: MQ,
+	pending_messages: Arc<MessageQueue>,
 	pending_events: Arc<EventQueue>,
 	per_peer_state: RwLock<HashMap<PublicKey, Mutex<PeerState>>>,
 	_config: LSPS2ClientConfig,
 }
 
-impl<ES: Deref, MQ: Deref> LSPS2ClientHandler<ES, MQ>
+impl<ES: Deref> LSPS2ClientHandler<ES>
 where
 	ES::Target: EntropySource,
-	MQ::Target: MessageQueue,
 {
 	/// Constructs an `LSPS2ClientHandler`.
 	pub(crate) fn new(
-		entropy_source: ES, pending_messages: MQ, pending_events: Arc<EventQueue>,
+		entropy_source: ES, pending_messages: Arc<MessageQueue>, pending_events: Arc<EventQueue>,
 		config: LSPS2ClientConfig,
 	) -> Self {
 		Self {
@@ -592,10 +590,9 @@ where
 	}
 }
 
-impl<ES: Deref, MQ: Deref> ProtocolMessageHandler for LSPS2ClientHandler<ES, MQ>
+impl<ES: Deref> ProtocolMessageHandler for LSPS2ClientHandler<ES>
 where
 	ES::Target: EntropySource,
-	MQ::Target: MessageQueue,
 {
 	type ProtocolMessage = LSPS2Message;
 	const PROTOCOL_NUMBER: Option<u16> = Some(2);

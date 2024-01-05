@@ -136,32 +136,30 @@ impl PeerState {
 }
 
 /// The main object allowing to send and receive LSPS1 messages.
-pub struct LSPS1ServiceHandler<ES: Deref, CM: Deref + Clone, MQ: Deref, C: Deref>
+pub struct LSPS1ServiceHandler<ES: Deref, CM: Deref + Clone, C: Deref>
 where
 	ES::Target: EntropySource,
 	CM::Target: AChannelManager,
-	MQ::Target: MessageQueue,
 	C::Target: Filter,
 {
 	entropy_source: ES,
 	channel_manager: CM,
 	chain_source: Option<C>,
-	pending_messages: MQ,
+	pending_messages: Arc<MessageQueue>,
 	pending_events: Arc<EventQueue>,
 	per_peer_state: RwLock<HashMap<PublicKey, Mutex<PeerState>>>,
 	config: LSPS1ServiceConfig,
 }
 
-impl<ES: Deref, CM: Deref + Clone, MQ: Deref, C: Deref> LSPS1ServiceHandler<ES, CM, MQ, C>
+impl<ES: Deref, CM: Deref + Clone, C: Deref> LSPS1ServiceHandler<ES, CM, C>
 where
 	ES::Target: EntropySource,
 	CM::Target: AChannelManager,
-	MQ::Target: MessageQueue,
 	C::Target: Filter,
 	ES::Target: EntropySource,
 {
 	pub(crate) fn new(
-		entropy_source: ES, pending_messages: MQ, pending_events: Arc<EventQueue>,
+		entropy_source: ES, pending_messages: Arc<MessageQueue>, pending_events: Arc<EventQueue>,
 		channel_manager: CM, chain_source: Option<C>, config: LSPS1ServiceConfig,
 	) -> Self {
 		Self {
@@ -422,12 +420,11 @@ where
 	}
 }
 
-impl<ES: Deref, CM: Deref + Clone, MQ: Deref, C: Deref> ProtocolMessageHandler
-	for LSPS1ServiceHandler<ES, CM, MQ, C>
+impl<ES: Deref, CM: Deref + Clone, C: Deref> ProtocolMessageHandler
+	for LSPS1ServiceHandler<ES, CM, C>
 where
 	ES::Target: EntropySource,
 	CM::Target: AChannelManager,
-	MQ::Target: MessageQueue,
 	C::Target: Filter,
 {
 	type ProtocolMessage = LSPS1Message;

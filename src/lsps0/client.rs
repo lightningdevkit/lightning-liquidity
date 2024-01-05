@@ -23,24 +23,22 @@ use bitcoin::secp256k1::PublicKey;
 use core::ops::Deref;
 
 /// A message handler capable of sending and handling LSPS0 messages.
-pub struct LSPS0ClientHandler<ES: Deref, MQ: Deref>
+pub struct LSPS0ClientHandler<ES: Deref>
 where
 	ES::Target: EntropySource,
-	MQ::Target: MessageQueue,
 {
 	entropy_source: ES,
-	pending_messages: MQ,
+	pending_messages: Arc<MessageQueue>,
 	pending_events: Arc<EventQueue>,
 }
 
-impl<ES: Deref, MQ: Deref> LSPS0ClientHandler<ES, MQ>
+impl<ES: Deref> LSPS0ClientHandler<ES>
 where
 	ES::Target: EntropySource,
-	MQ::Target: MessageQueue,
 {
 	/// Returns a new instance of [`LSPS0ClientHandler`].
 	pub(crate) fn new(
-		entropy_source: ES, pending_messages: MQ, pending_events: Arc<EventQueue>,
+		entropy_source: ES, pending_messages: Arc<MessageQueue>, pending_events: Arc<EventQueue>,
 	) -> Self {
 		Self { entropy_source, pending_messages, pending_events }
 	}
@@ -85,10 +83,9 @@ where
 	}
 }
 
-impl<ES: Deref, MQ: Deref> ProtocolMessageHandler for LSPS0ClientHandler<ES, MQ>
+impl<ES: Deref> ProtocolMessageHandler for LSPS0ClientHandler<ES>
 where
 	ES::Target: EntropySource,
-	MQ::Target: MessageQueue,
 {
 	type ProtocolMessage = LSPS0Message;
 	const PROTOCOL_NUMBER: Option<u16> = None;
@@ -118,13 +115,13 @@ mod tests {
 	use alloc::sync::Arc;
 
 	use crate::lsps0::msgs::{LSPSMessage, RequestId};
-	use crate::tests::utils::{TestEntropy, TestMessageQueue};
+	use crate::tests::utils::TestEntropy;
 
 	use super::*;
 
 	#[test]
 	fn test_list_protocols() {
-		let pending_messages = Arc::new(TestMessageQueue::new());
+		let pending_messages = Arc::new(MessageQueue::new());
 		let entropy_source = Arc::new(TestEntropy {});
 		let event_queue = Arc::new(EventQueue::new());
 
