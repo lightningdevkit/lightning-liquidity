@@ -25,6 +25,7 @@ compile_error!("at least one of the `std` or `no-std` features must be enabled")
 extern crate alloc;
 
 mod prelude {
+	#![allow(unused_imports)]
 	#[cfg(feature = "hashbrown")]
 	extern crate hashbrown;
 
