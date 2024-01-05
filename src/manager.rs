@@ -471,7 +471,7 @@ where
 	C::Target: Filter,
 {
 	fn filtered_block_connected(
-		&self, header: &bitcoin::BlockHeader, txdata: &chain::transaction::TransactionData,
+		&self, header: &bitcoin::block::Header, txdata: &chain::transaction::TransactionData,
 		height: u32,
 	) {
 		if let Some(best_block) = &self.best_block {
@@ -486,7 +486,7 @@ where
 		self.best_block_updated(header, height);
 	}
 
-	fn block_disconnected(&self, header: &bitcoin::BlockHeader, height: u32) {
+	fn block_disconnected(&self, header: &bitcoin::block::Header, height: u32) {
 		let new_height = height - 1;
 		if let Some(best_block) = &self.best_block {
 			let mut best_block = best_block.write().unwrap();
@@ -510,7 +510,7 @@ where
 	C::Target: Filter,
 {
 	fn transactions_confirmed(
-		&self, header: &bitcoin::BlockHeader, txdata: &chain::transaction::TransactionData,
+		&self, header: &bitcoin::block::Header, txdata: &chain::transaction::TransactionData,
 		height: u32,
 	) {
 		// TODO: Call transactions_confirmed on all sub-modules that require it, e.g., LSPS1MessageHandler.
@@ -522,11 +522,11 @@ where
 		// confirmed at a height <= the one we now unconfirmed.
 	}
 
-	fn best_block_updated(&self, header: &bitcoin::BlockHeader, height: u32) {
+	fn best_block_updated(&self, header: &bitcoin::block::Header, height: u32) {
 		// TODO: Call best_block_updated on all sub-modules that require it, e.g., LSPS1MessageHandler.
 	}
 
-	fn get_relevant_txids(&self) -> Vec<(bitcoin::Txid, Option<bitcoin::BlockHash>)> {
+	fn get_relevant_txids(&self) -> Vec<(bitcoin::Txid, u32, Option<bitcoin::BlockHash>)> {
 		// TODO: Collect relevant txids from all sub-modules that, e.g., LSPS1MessageHandler.
 		Vec::new()
 	}
