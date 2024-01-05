@@ -9,7 +9,6 @@ use crate::lsps1::msgs::{
 };
 use crate::lsps2::msgs::{
 	LSPS2Message, LSPS2Request, LSPS2Response, LSPS2_BUY_METHOD_NAME, LSPS2_GET_INFO_METHOD_NAME,
-	LSPS2_GET_VERSIONS_METHOD_NAME,
 };
 use crate::prelude::{HashMap, String, ToString, Vec};
 
@@ -294,9 +293,6 @@ impl Serialize for LSPSMessage {
 				jsonrpc_object.serialize_field(JSONRPC_METHOD_FIELD_KEY, request.method())?;
 
 				match request {
-					LSPS2Request::GetVersions(params) => {
-						jsonrpc_object.serialize_field(JSONRPC_PARAMS_FIELD_KEY, params)?
-					}
 					LSPS2Request::GetInfo(params) => {
 						jsonrpc_object.serialize_field(JSONRPC_PARAMS_FIELD_KEY, params)?
 					}
@@ -309,9 +305,6 @@ impl Serialize for LSPSMessage {
 				jsonrpc_object.serialize_field(JSONRPC_ID_FIELD_KEY, &request_id.0)?;
 
 				match response {
-					LSPS2Response::GetVersions(result) => {
-						jsonrpc_object.serialize_field(JSONRPC_RESULT_FIELD_KEY, result)?
-					}
 					LSPS2Response::GetInfo(result) => {
 						jsonrpc_object.serialize_field(JSONRPC_RESULT_FIELD_KEY, result)?
 					}
@@ -423,14 +416,6 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 						LSPS1Request::GetOrder(request),
 					)))
 				}
-				LSPS2_GET_VERSIONS_METHOD_NAME => {
-					let request = serde_json::from_value(params.unwrap_or(json!({})))
-						.map_err(de::Error::custom)?;
-					Ok(LSPSMessage::LSPS2(LSPS2Message::Request(
-						RequestId(id),
-						LSPS2Request::GetVersions(request),
-					)))
-				}
 				LSPS2_GET_INFO_METHOD_NAME => {
 					let request = serde_json::from_value(params.unwrap_or(json!({})))
 						.map_err(de::Error::custom)?;
@@ -469,18 +454,6 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 							)))
 						} else {
 							Err(de::Error::custom("Received invalid JSON-RPC object: one of method, result, or error required"))
-						}
-					}
-					LSPS2_GET_VERSIONS_METHOD_NAME => {
-						if let Some(result) = result {
-							let response =
-								serde_json::from_value(result).map_err(de::Error::custom)?;
-							Ok(LSPSMessage::LSPS2(LSPS2Message::Response(
-								RequestId(id),
-								LSPS2Response::GetVersions(response),
-							)))
-						} else {
-							Err(de::Error::custom("Received invalid lsps2.get_versions response."))
 						}
 					}
 					#[cfg(lsps1)]

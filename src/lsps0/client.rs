@@ -115,7 +115,7 @@ mod tests {
 	use alloc::sync::Arc;
 
 	use crate::lsps0::msgs::{LSPSMessage, RequestId};
-	use crate::tests::utils::TestEntropy;
+	use crate::tests::utils::{self, TestEntropy};
 
 	use super::*;
 

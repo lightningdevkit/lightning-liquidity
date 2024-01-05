@@ -82,7 +82,7 @@ impl ProtocolMessageHandler for LSPS0ServiceHandler {
 mod tests {
 
 	use crate::lsps0::msgs::{LSPSMessage, ListProtocolsRequest};
-	use crate::utils;
+	use crate::tests::utils;
 	use alloc::string::ToString;
 	use alloc::sync::Arc;
 

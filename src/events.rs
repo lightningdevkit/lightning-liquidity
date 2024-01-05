@@ -131,13 +131,12 @@ impl Future for EventFuture {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
-	use crate::lsps0::event::LSPS0ClientEvent;
-	use bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey};
-
 	#[tokio::test]
 	#[cfg(feature = "std")]
 	async fn event_queue_works() {
+		use super::*;
+		use crate::lsps0::event::LSPS0ClientEvent;
+		use bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey};
 		use core::sync::atomic::{AtomicU16, Ordering};
 		use std::sync::Arc;
 		use std::time::Duration;

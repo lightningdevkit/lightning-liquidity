@@ -25,6 +25,7 @@ compile_error!("at least one of the `std` or `no-std` features must be enabled")
 extern crate alloc;
 
 mod prelude {
+	#![allow(unused_imports)]
 	#[cfg(feature = "hashbrown")]
 	extern crate hashbrown;
 
@@ -41,6 +42,8 @@ mod prelude {
 pub mod events;
 pub mod lsps0;
 #[cfg(lsps1)]
+// TODO: disallow warnings once the implementation is finished
+#[allow(warnings)]
 pub mod lsps1;
 pub mod lsps2;
 mod manager;

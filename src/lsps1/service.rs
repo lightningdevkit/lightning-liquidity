@@ -1,4 +1,4 @@
-// This file is Copyright its original authors, visible in version contror
+// This file is Copyright its original authors, visible in version control
 // history.
 //
 // This file is licensed under the Apache License, Version 2.0 <LICENSE-APACHE
@@ -13,8 +13,7 @@ use super::event::LSPS1ServiceEvent;
 use super::msgs::{
 	ChannelInfo, CreateOrderRequest, CreateOrderResponse, GetInfoResponse, GetOrderRequest,
 	GetOrderResponse, LSPS1Message, LSPS1Request, LSPS1Response, OptionsSupported, OrderId,
-	OrderParams, OrderPayment, OrderState, LSPS1_CREATE_ORDER_REQUEST_INVALID_VERSION_ERROR_CODE,
-	LSPS1_CREATE_ORDER_REQUEST_ORDER_MISMATCH_ERROR_CODE,
+	OrderParams, OrderPayment, OrderState, LSPS1_CREATE_ORDER_REQUEST_ORDER_MISMATCH_ERROR_CODE,
 };
 use super::utils::is_valid;
 use crate::message_queue::MessageQueue;
@@ -37,8 +36,6 @@ use bitcoin::secp256k1::PublicKey;
 
 use chrono::Utc;
 use core::ops::Deref;
-
-const SUPPORTED_SPEC_VERSIONS: [u16; 1] = [1];
 
 /// Server-side configuration options for LSPS1 channel requests.
 #[derive(Clone, Debug)]
@@ -72,10 +69,7 @@ impl OutboundRequestState {
 			OutboundRequestState::OrderCreated { order_id } => {
 				Ok(OutboundRequestState::WaitingPayment { order_id: order_id.clone() })
 			}
-			state => Err(ChannelStateError(format!(
-				"Received unexpected get_versions response. JIT Channel was in state: {:?}",
-				state
-			))),
+			state => Err(ChannelStateError(format!("TODO. JIT Channel was in state: {:?}", state))),
 		}
 	}
 }
@@ -177,7 +171,6 @@ where
 		&self, request_id: RequestId, counterparty_node_id: &PublicKey,
 	) -> Result<(), LightningError> {
 		let response = GetInfoResponse {
-			supported_versions: SUPPORTED_SPEC_VERSIONS.to_vec(),
 			website: self.config.website.clone().unwrap().to_string(),
 			options: self
 				.config
@@ -197,22 +190,6 @@ where
 	fn handle_create_order_request(
 		&self, request_id: RequestId, counterparty_node_id: &PublicKey, params: CreateOrderRequest,
 	) -> Result<(), LightningError> {
-		if !SUPPORTED_SPEC_VERSIONS.contains(&params.version) {
-			self.enqueue_response(
-				counterparty_node_id,
-				request_id,
-				LSPS1Response::CreateOrderError(ResponseError {
-					code: LSPS1_CREATE_ORDER_REQUEST_INVALID_VERSION_ERROR_CODE,
-					message: format!("version {} is not supported", params.version),
-					data: Some(format!("Supported versions are {:?}", SUPPORTED_SPEC_VERSIONS)),
-				}),
-			);
-			return Err(LightningError {
-				err: format!("client requested unsupported version {}", params.version),
-				action: ErrorAction::IgnoreAndLog(Level::Info),
-			});
-		}
-
 		if !is_valid(&params.order, &self.config.options_supported.as_ref().unwrap()) {
 			self.enqueue_response(
 				counterparty_node_id,
@@ -227,7 +204,10 @@ where
 				}),
 			);
 			return Err(LightningError {
-				err: format!("client requested unsupported version {}", params.version),
+				err: format!(
+					"Client order does not match any supported options: {:?}",
+					params.order
+				),
 				action: ErrorAction::IgnoreAndLog(Level::Info),
 			});
 		}

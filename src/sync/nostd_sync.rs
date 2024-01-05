@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! This file was copied from `rust-lightning`.
 pub use ::alloc::sync::Arc;
 use core::cell::{Ref, RefCell, RefMut};
