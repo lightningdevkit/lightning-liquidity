@@ -509,19 +509,19 @@ where
 	C::Target: Filter,
 {
 	fn transactions_confirmed(
-		&self, header: &bitcoin::block::Header, txdata: &chain::transaction::TransactionData,
-		height: u32,
+		&self, _header: &bitcoin::block::Header, _txdata: &chain::transaction::TransactionData,
+		_height: u32,
 	) {
 		// TODO: Call transactions_confirmed on all sub-modules that require it, e.g., LSPS1MessageHandler.
 	}
 
-	fn transaction_unconfirmed(&self, txid: &bitcoin::Txid) {
+	fn transaction_unconfirmed(&self, _txid: &bitcoin::Txid) {
 		// TODO: Call transaction_unconfirmed on all sub-modules that require it, e.g., LSPS1MessageHandler.
 		// Internally this should call transaction_unconfirmed for all transactions that were
 		// confirmed at a height <= the one we now unconfirmed.
 	}
 
-	fn best_block_updated(&self, header: &bitcoin::block::Header, height: u32) {
+	fn best_block_updated(&self, _header: &bitcoin::block::Header, _height: u32) {
 		// TODO: Call best_block_updated on all sub-modules that require it, e.g., LSPS1MessageHandler.
 	}
 
