@@ -128,3 +128,112 @@ impl Future for EventFuture {
 		}
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::lsps0::event::LSPS0ClientEvent;
+	use bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey};
+
+	#[tokio::test]
+	#[cfg(feature = "std")]
+	async fn event_queue_works() {
+		use core::sync::atomic::{AtomicU16, Ordering};
+		use std::sync::Arc;
+		use std::time::Duration;
+
+		let event_queue = Arc::new(EventQueue::new());
+		assert_eq!(event_queue.next_event(), None);
+
+		let secp_ctx = Secp256k1::new();
+		let counterparty_node_id =
+			PublicKey::from_secret_key(&secp_ctx, &SecretKey::from_slice(&[42; 32]).unwrap());
+		let expected_event = Event::LSPS0Client(LSPS0ClientEvent::ListProtocolsResponse {
+			counterparty_node_id,
+			protocols: Vec::new(),
+		});
+
+		for _ in 0..3 {
+			event_queue.enqueue(expected_event.clone());
+		}
+
+		assert_eq!(event_queue.wait_next_event(), expected_event);
+		assert_eq!(event_queue.next_event_async().await, expected_event);
+		assert_eq!(event_queue.next_event(), Some(expected_event.clone()));
+		assert_eq!(event_queue.next_event(), None);
+
+		// Check `next_event_async` won't return if the queue is empty and always rather timeout.
+		tokio::select! {
+			_ = tokio::time::sleep(Duration::from_millis(10)) => {
+				// Timeout
+			}
+			_ = event_queue.next_event_async() => {
+				panic!();
+			}
+		}
+		assert_eq!(event_queue.next_event(), None);
+
+		// Check we get the expected number of events when polling/enqueuing concurrently.
+		let enqueued_events = AtomicU16::new(0);
+		let received_events = AtomicU16::new(0);
+		let mut delayed_enqueue = false;
+
+		for _ in 0..25 {
+			event_queue.enqueue(expected_event.clone());
+			enqueued_events.fetch_add(1, Ordering::SeqCst);
+		}
+
+		loop {
+			tokio::select! {
+				_ = tokio::time::sleep(Duration::from_millis(10)), if !delayed_enqueue => {
+					event_queue.enqueue(expected_event.clone());
+					enqueued_events.fetch_add(1, Ordering::SeqCst);
+					delayed_enqueue = true;
+				}
+				e = event_queue.next_event_async() => {
+					assert_eq!(e, expected_event);
+					received_events.fetch_add(1, Ordering::SeqCst);
+
+					event_queue.enqueue(expected_event.clone());
+					enqueued_events.fetch_add(1, Ordering::SeqCst);
+				}
+				e = event_queue.next_event_async() => {
+					assert_eq!(e, expected_event);
+					received_events.fetch_add(1, Ordering::SeqCst);
+				}
+			}
+
+			if delayed_enqueue
+				&& received_events.load(Ordering::SeqCst) == enqueued_events.load(Ordering::SeqCst)
+			{
+				break;
+			}
+		}
+		assert_eq!(event_queue.next_event(), None);
+
+		// Check we operate correctly, even when mixing and matching blocking and async API calls.
+		let (tx, mut rx) = tokio::sync::watch::channel(());
+		let thread_queue = Arc::clone(&event_queue);
+		let thread_event = expected_event.clone();
+		std::thread::spawn(move || {
+			let e = thread_queue.wait_next_event();
+			assert_eq!(e, thread_event);
+			tx.send(()).unwrap();
+		});
+
+		let thread_queue = Arc::clone(&event_queue);
+		let thread_event = expected_event.clone();
+		std::thread::spawn(move || {
+			// Sleep a bit before we enqueue the events everybody is waiting for.
+			std::thread::sleep(Duration::from_millis(20));
+			thread_queue.enqueue(thread_event.clone());
+			thread_queue.enqueue(thread_event.clone());
+		});
+
+		let e = event_queue.next_event_async().await;
+		assert_eq!(e, expected_event.clone());
+
+		rx.changed().await.unwrap();
+		assert_eq!(event_queue.next_event(), None);
+	}
+}
