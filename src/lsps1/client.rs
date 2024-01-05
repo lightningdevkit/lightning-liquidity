@@ -1,4 +1,4 @@
-// This file is Copyright its original authors, visible in version contror
+// This file is Copyright its original authors, visible in version control
 // history.
 //
 // This file is licensed under the Apache License, Version 2.0 <LICENSE-APACHE
@@ -35,8 +35,6 @@ use bitcoin::secp256k1::PublicKey;
 
 use core::ops::Deref;
 
-const SUPPORTED_SPEC_VERSIONS: [u16; 1] = [1];
-
 /// Client-side configuration options for LSPS1 channel requests.
 #[derive(Clone, Debug)]
 pub struct LSPS1ClientConfig {
@@ -55,33 +53,20 @@ impl From<ChannelStateError> for LightningError {
 #[derive(PartialEq, Debug)]
 enum InboundRequestState {
 	InfoRequested,
-	OptionsSupport { version: u16, options_supported: OptionsSupported },
-	OrderRequested { version: u16, order: OrderParams },
+	OptionsSupport { options_supported: OptionsSupported },
+	OrderRequested { order: OrderParams },
 	PendingPayment { order_id: OrderId },
 	AwaitingConfirmation { id: u128, order_id: OrderId },
 }
 
 impl InboundRequestState {
-	fn info_received(
-		&self, versions: Vec<u16>, options: OptionsSupported,
-	) -> Result<Self, ChannelStateError> {
-		let max_shared_version = versions
-			.iter()
-			.filter(|version| SUPPORTED_SPEC_VERSIONS.contains(version))
-			.max()
-			.cloned()
-			.ok_or(ChannelStateError(format!(
-			"LSP does not support any of our specification versions.  ours = {:?}. theirs = {:?}",
-			SUPPORTED_SPEC_VERSIONS, versions
-		)))?;
-
+	fn info_received(&self, options: OptionsSupported) -> Result<Self, ChannelStateError> {
 		match self {
-			InboundRequestState::InfoRequested => Ok(InboundRequestState::OptionsSupport {
-				version: max_shared_version,
-				options_supported: options,
-			}),
+			InboundRequestState::InfoRequested => {
+				Ok(InboundRequestState::OptionsSupport { options_supported: options })
+			}
 			state => Err(ChannelStateError(format!(
-				"Received unexpected get_versions response. Channel was in state: {:?}",
+				"Received unexpected get_info response. Channel was in state: {:?}",
 				state
 			))),
 		}
@@ -89,9 +74,9 @@ impl InboundRequestState {
 
 	fn order_requested(&self, order: OrderParams) -> Result<Self, ChannelStateError> {
 		match self {
-			InboundRequestState::OptionsSupport { version, options_supported } => {
+			InboundRequestState::OptionsSupport { options_supported } => {
 				if is_valid(&order, options_supported) {
-					Ok(InboundRequestState::OrderRequested { version: *version, order })
+					Ok(InboundRequestState::OrderRequested { order })
 				} else {
 					return Err(ChannelStateError(format!(
 						"The order created does not match options supported by LSP. Options Supported by LSP are {:?}. The order created was {:?}",
@@ -110,7 +95,7 @@ impl InboundRequestState {
 		&self, response_order: &OrderParams, order_id: OrderId,
 	) -> Result<Self, ChannelStateError> {
 		match self {
-			InboundRequestState::OrderRequested { version, order } => {
+			InboundRequestState::OrderRequested { order } => {
 				if response_order == order {
 					Ok(InboundRequestState::PendingPayment { order_id })
 				} else {
@@ -153,13 +138,11 @@ impl InboundCRChannel {
 		Self { id, state: InboundRequestState::InfoRequested }
 	}
 
-	fn info_received(
-		&mut self, versions: Vec<u16>, options: OptionsSupported,
-	) -> Result<u16, LightningError> {
-		self.state = self.state.info_received(versions, options)?;
+	fn info_received(&mut self, options: OptionsSupported) -> Result<(), LightningError> {
+		self.state = self.state.info_received(options)?;
 
 		match self.state {
-			InboundRequestState::OptionsSupport { version, .. } => Ok(version),
+			InboundRequestState::OptionsSupport { .. } => Ok(()),
 			_ => Err(LightningError {
 				action: ErrorAction::IgnoreAndLog(Level::Error),
 				err: "impossible state transition".to_string(),
@@ -167,11 +150,11 @@ impl InboundCRChannel {
 		}
 	}
 
-	fn order_requested(&mut self, order: OrderParams) -> Result<u16, LightningError> {
+	fn order_requested(&mut self, order: OrderParams) -> Result<(), LightningError> {
 		self.state = self.state.order_requested(order)?;
 
 		match self.state {
-			InboundRequestState::OrderRequested { version, .. } => Ok(version),
+			InboundRequestState::OrderRequested { .. } => Ok(()),
 			_ => {
 				return Err(LightningError {
 					action: ErrorAction::IgnoreAndLog(Level::Error),
@@ -301,10 +284,8 @@ where
 					action: ErrorAction::IgnoreAndLog(Level::Info),
 				})?;
 
-				let version = match inbound_channel
-					.info_received(result.supported_versions, result.options.clone())
-				{
-					Ok(version) => version,
+				match inbound_channel.info_received(result.options.clone()) {
+					Ok(()) => (),
 					Err(e) => {
 						peer_state_lock.remove_inbound_channel(channel_id);
 						return Err(e);
@@ -315,7 +296,6 @@ where
 					id: channel_id,
 					request_id,
 					counterparty_node_id: *counterparty_node_id,
-					version,
 					website: result.website,
 					options_supported: result.options,
 				}))
@@ -349,8 +329,8 @@ where
 					err: format!("Channel with id {} not found", channel_id),
 				})?;
 
-				let version = match inbound_channel.order_requested(order.clone()) {
-					Ok(version) => version,
+				match inbound_channel.order_requested(order.clone()) {
+					Ok(()) => (),
 					Err(e) => {
 						peer_state_lock.remove_inbound_channel(channel_id);
 						return Err(APIError::APIMisuseError { err: e.err });
@@ -364,7 +344,7 @@ where
 					counterparty_node_id,
 					LSPS1Message::Request(
 						request_id,
-						LSPS1Request::CreateOrder(CreateOrderRequest { order, version }),
+						LSPS1Request::CreateOrder(CreateOrderRequest { order }),
 					)
 					.into(),
 				);
@@ -540,7 +520,7 @@ where
 				let channel_id =
 					peer_state_lock.request_to_cid.remove(&request_id).ok_or(LightningError {
 						err: format!(
-							"Received get_versions response for an unknown request: {:?}",
+							"Received get_order response for an unknown request: {:?}",
 							request_id
 						),
 						action: ErrorAction::IgnoreAndLog(Level::Info),
@@ -551,7 +531,7 @@ where
 					.get_mut(&channel_id)
 					.ok_or(LightningError {
 					err: format!(
-						"Received get_versions response for an unknown channel: {:?}",
+						"Received get_order response for an unknown channel: {:?}",
 						channel_id
 					),
 					action: ErrorAction::IgnoreAndLog(Level::Info),

@@ -19,8 +19,6 @@ pub enum LSPS1ClientEvent {
 		/// TODO
 		counterparty_node_id: PublicKey,
 		/// TODO
-		version: u16,
-		/// TODO
 		website: String,
 		/// TODO
 		options_supported: OptionsSupported,

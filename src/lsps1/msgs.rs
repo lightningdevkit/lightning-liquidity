@@ -16,7 +16,6 @@ pub(crate) const LSPS1_GET_ORDER_METHOD_NAME: &str = "lsps1.get_order";
 pub(crate) const LSPS1_CREATE_ORDER_REQUEST_INVALID_PARAMS_ERROR_CODE: i32 = -32602;
 pub(crate) const LSPS1_CREATE_ORDER_REQUEST_ORDER_MISMATCH_ERROR_CODE: i32 = 1000;
 pub(crate) const LSPS1_CREATE_ORDER_REQUEST_CLIENT_REJECTED_ERROR_CODE: i32 = 1001;
-pub(crate) const LSPS1_CREATE_ORDER_REQUEST_INVALID_VERSION_ERROR_CODE: i32 = 1;
 pub(crate) const LSPS1_CREATE_ORDER_REQUEST_INVALID_TOKEN_ERROR_CODE: i32 = 2;
 
 /// The identifier of an order.
@@ -62,8 +61,6 @@ pub struct OptionsSupported {
 /// A response to an [`GetInfoRequest`].
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct GetInfoResponse {
-	/// A list of all supported API versions by the LSP.
-	pub supported_versions: Vec<u16>,
 	/// The website of the LSP.
 	pub website: String,
 	/// All options supported by the LSP.
@@ -76,8 +73,6 @@ pub struct GetInfoResponse {
 /// for more information.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CreateOrderRequest {
-	/// TODO: this is superfluous and should likely be removed.
-	pub version: u16,
 	/// The order made.
 	pub order: OrderParams,
 }
@@ -85,8 +80,6 @@ pub struct CreateOrderRequest {
 /// An object representing an LSPS1 channel order.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct OrderParams {
-	/// The API version that the client wants to work with.
-	pub api_version: u16,
 	/// Indicates how many satoshi the LSP will provide on their side.
 	pub lsp_balance_sat: u64,
 	/// Indicates how many satoshi the client will provide on their side.
