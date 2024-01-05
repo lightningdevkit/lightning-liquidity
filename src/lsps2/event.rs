@@ -87,8 +87,6 @@ pub enum LSPS2ServiceEvent {
 		request_id: RequestId,
 		/// The node id of the client making the information request.
 		counterparty_node_id: PublicKey,
-		/// The protocol version they would like to use.
-		version: u16,
 		/// An optional token that can be used as an API key, coupon code, etc.
 		token: Option<String>,
 	},
@@ -109,8 +107,6 @@ pub enum LSPS2ServiceEvent {
 		request_id: RequestId,
 		/// The client node id that is making this request.
 		counterparty_node_id: PublicKey,
-		/// The version of the protocol they would like to use.
-		version: u16,
 		/// The channel parameters they have selected.
 		opening_fee_params: OpeningFeeParams,
 		/// The size of the initial payment they would like to receive.

@@ -12,34 +12,18 @@ use crate::lsps0::msgs::{LSPSMessage, RequestId, ResponseError};
 use crate::prelude::{String, Vec};
 use crate::utils;
 
-pub(crate) const LSPS2_GET_VERSIONS_METHOD_NAME: &str = "lsps2.get_versions";
 pub(crate) const LSPS2_GET_INFO_METHOD_NAME: &str = "lsps2.get_info";
 pub(crate) const LSPS2_BUY_METHOD_NAME: &str = "lsps2.buy";
 
-pub(crate) const LSPS2_GET_INFO_REQUEST_INVALID_VERSION_ERROR_CODE: i32 = 1;
 pub(crate) const LSPS2_GET_INFO_REQUEST_UNRECOGNIZED_OR_STALE_TOKEN_ERROR_CODE: i32 = 2;
 
-pub(crate) const LSPS2_BUY_REQUEST_INVALID_VERSION_ERROR_CODE: i32 = 1;
 pub(crate) const LSPS2_BUY_REQUEST_INVALID_OPENING_FEE_PARAMS_ERROR_CODE: i32 = 2;
 pub(crate) const LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_SMALL_ERROR_CODE: i32 = 3;
 pub(crate) const LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_LARGE_ERROR_CODE: i32 = 4;
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
-/// A request made to an LSP to learn what versions of the protocol they support.
-pub struct GetVersionsRequest {}
-
-/// A response to a [`GetVersionsRequest`].
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct GetVersionsResponse {
-	/// The list of versions an LSP supports.
-	pub versions: Vec<u16>,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 /// A request made to an LSP to learn their current channel fees and parameters.
 pub struct GetInfoRequest {
-	/// What version of the protocol we want to use.
-	pub version: u16,
 	/// An optional token to provide to the LSP.
 	pub token: Option<String>,
 }
@@ -117,8 +101,6 @@ pub struct GetInfoResponse {
 /// A request to buy a JIT channel.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct BuyRequest {
-	/// The version of the protocol to use.
-	pub version: u16,
 	/// The fee parameters you would like to use.
 	pub opening_fee_params: OpeningFeeParams,
 	/// The size of the initial payment you expect to receive.
@@ -164,8 +146,6 @@ pub struct BuyResponse {
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// An enum that captures all the valid JSON-RPC requests in the LSPS2 protocol.
 pub enum LSPS2Request {
-	/// A request to learn what versions an LSP supports.
-	GetVersions(GetVersionsRequest),
 	/// A request to learn an LSP's channel fees and parameters.
 	GetInfo(GetInfoRequest),
 	/// A request to buy a JIT channel from an LSP.
@@ -176,7 +156,6 @@ impl LSPS2Request {
 	/// Get the JSON-RPC method name for the underlying request.
 	pub fn method(&self) -> &str {
 		match self {
-			LSPS2Request::GetVersions(_) => LSPS2_GET_VERSIONS_METHOD_NAME,
 			LSPS2Request::GetInfo(_) => LSPS2_GET_INFO_METHOD_NAME,
 			LSPS2Request::Buy(_) => LSPS2_BUY_METHOD_NAME,
 		}
@@ -186,8 +165,6 @@ impl LSPS2Request {
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// An enum that captures all the valid JSON-RPC responses in the LSPS2 protocol.
 pub enum LSPS2Response {
-	/// A successful response to a [`LSPS2Request::GetVersions`] request.
-	GetVersions(GetVersionsResponse),
 	/// A successful response to a [`LSPS2Request::GetInfo`] request.
 	GetInfo(GetInfoResponse),
 	/// An error response to a [`LSPS2Request::GetInfo`] request.

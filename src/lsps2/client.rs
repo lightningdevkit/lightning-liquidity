@@ -13,7 +13,7 @@ use crate::events::{Event, EventQueue};
 use crate::lsps0::msgs::{ProtocolMessageHandler, RequestId, ResponseError};
 use crate::lsps2::event::LSPS2ClientEvent;
 use crate::message_queue::MessageQueue;
-use crate::prelude::{HashMap, String, ToString, Vec};
+use crate::prelude::{HashMap, String, ToString};
 use crate::sync::{Arc, Mutex, RwLock};
 
 use lightning::ln::msgs::{ErrorAction, LightningError};
@@ -26,16 +26,13 @@ use bitcoin::secp256k1::PublicKey;
 use core::ops::Deref;
 
 use crate::lsps2::msgs::{
-	BuyRequest, BuyResponse, GetInfoRequest, GetInfoResponse, GetVersionsRequest,
-	GetVersionsResponse, InterceptScid, LSPS2Message, LSPS2Request, LSPS2Response,
-	OpeningFeeParams,
+	BuyRequest, BuyResponse, GetInfoRequest, GetInfoResponse, InterceptScid, LSPS2Message,
+	LSPS2Request, LSPS2Response, OpeningFeeParams,
 };
 
 /// Client-side configuration options for JIT channels.
 #[derive(Clone, Debug, Copy)]
 pub struct LSPS2ClientConfig {}
-
-const SUPPORTED_SPEC_VERSIONS: [u16; 1] = [1];
 
 struct ChannelStateError(String);
 
@@ -47,46 +44,22 @@ impl From<ChannelStateError> for LightningError {
 
 struct InboundJITChannelConfig {
 	pub user_id: u128,
-	pub token: Option<String>,
 	pub payment_size_msat: Option<u64>,
 }
 
 #[derive(PartialEq, Debug)]
 enum InboundJITChannelState {
-	VersionsRequested,
-	MenuRequested { version: u16 },
-	PendingMenuSelection { version: u16 },
-	BuyRequested { version: u16 },
+	MenuRequested,
+	PendingMenuSelection,
+	BuyRequested,
 	PendingPayment { client_trusts_lsp: bool, intercept_scid: InterceptScid },
 }
 
 impl InboundJITChannelState {
-	fn versions_received(&self, versions: Vec<u16>) -> Result<Self, ChannelStateError> {
-		let max_shared_version = versions
-			.iter()
-			.filter(|version| SUPPORTED_SPEC_VERSIONS.contains(version))
-			.max()
-			.cloned()
-			.ok_or(ChannelStateError(format!(
-			"LSP does not support any of our specification versions.  ours = {:?}. theirs = {:?}",
-			SUPPORTED_SPEC_VERSIONS, versions
-		)))?;
-
-		match self {
-			InboundJITChannelState::VersionsRequested => {
-				Ok(InboundJITChannelState::MenuRequested { version: max_shared_version })
-			}
-			state => Err(ChannelStateError(format!(
-				"Received unexpected get_versions response. JIT Channel was in state: {:?}",
-				state
-			))),
-		}
-	}
-
 	fn info_received(&self) -> Result<Self, ChannelStateError> {
 		match self {
-			InboundJITChannelState::MenuRequested { version } => {
-				Ok(InboundJITChannelState::PendingMenuSelection { version: *version })
+			InboundJITChannelState::MenuRequested => {
+				Ok(InboundJITChannelState::PendingMenuSelection)
 			}
 			state => Err(ChannelStateError(format!(
 				"Received unexpected get_info response.  JIT Channel was in state: {:?}",
@@ -97,8 +70,8 @@ impl InboundJITChannelState {
 
 	fn opening_fee_params_selected(&self) -> Result<Self, ChannelStateError> {
 		match self {
-			InboundJITChannelState::PendingMenuSelection { version } => {
-				Ok(InboundJITChannelState::BuyRequested { version: *version })
+			InboundJITChannelState::PendingMenuSelection => {
+				Ok(InboundJITChannelState::BuyRequested)
 			}
 			state => Err(ChannelStateError(format!(
 				"Opening fee params selected when JIT Channel was in state: {:?}",
@@ -123,29 +96,15 @@ impl InboundJITChannelState {
 }
 
 struct InboundJITChannel {
-	id: u128,
 	state: InboundJITChannelState,
 	config: InboundJITChannelConfig,
 }
 
 impl InboundJITChannel {
-	fn new(id: u128, user_id: u128, payment_size_msat: Option<u64>, token: Option<String>) -> Self {
+	fn new(user_id: u128, payment_size_msat: Option<u64>) -> Self {
 		Self {
-			id,
-			config: InboundJITChannelConfig { user_id, payment_size_msat, token },
-			state: InboundJITChannelState::VersionsRequested,
-		}
-	}
-
-	fn versions_received(&mut self, versions: Vec<u16>) -> Result<u16, LightningError> {
-		self.state = self.state.versions_received(versions)?;
-
-		match self.state {
-			InboundJITChannelState::MenuRequested { version } => Ok(version),
-			_ => Err(LightningError {
-				action: ErrorAction::IgnoreAndLog(Level::Error),
-				err: "impossible state transition".to_string(),
-			}),
+			config: InboundJITChannelConfig { user_id, payment_size_msat },
+			state: InboundJITChannelState::MenuRequested,
 		}
 	}
 
@@ -154,11 +113,11 @@ impl InboundJITChannel {
 		Ok(())
 	}
 
-	fn opening_fee_params_selected(&mut self) -> Result<u16, LightningError> {
+	fn opening_fee_params_selected(&mut self) -> Result<(), LightningError> {
 		self.state = self.state.opening_fee_params_selected()?;
 
 		match self.state {
-			InboundJITChannelState::BuyRequested { version } => Ok(version),
+			InboundJITChannelState::BuyRequested => Ok(()),
 			_ => Err(LightningError {
 				action: ErrorAction::IgnoreAndLog(Level::Error),
 				err: "impossible state transition".to_string(),
@@ -247,8 +206,7 @@ where
 		token: Option<String>, user_channel_id: u128,
 	) {
 		let jit_channel_id = self.generate_jit_channel_id();
-		let channel =
-			InboundJITChannel::new(jit_channel_id, user_channel_id, payment_size_msat, token);
+		let channel = InboundJITChannel::new(user_channel_id, payment_size_msat);
 
 		let mut outer_state_lock = self.per_peer_state.write().unwrap();
 		let inner_state_lock =
@@ -261,7 +219,7 @@ where
 
 		self.pending_messages.enqueue(
 			&counterparty_node_id,
-			LSPS2Message::Request(request_id, LSPS2Request::GetVersions(GetVersionsRequest {}))
+			LSPS2Message::Request(request_id, LSPS2Request::GetInfo(GetInfoRequest { token }))
 				.into(),
 		);
 	}
@@ -284,8 +242,8 @@ where
 				if let Some(jit_channel) =
 					peer_state.inbound_channels_by_id.get_mut(&jit_channel_id)
 				{
-					let version = match jit_channel.opening_fee_params_selected() {
-						Ok(version) => version,
+					match jit_channel.opening_fee_params_selected() {
+						Ok(()) => (),
 						Err(e) => {
 							peer_state.remove_inbound_channel(jit_channel_id);
 							return Err(APIError::APIMisuseError { err: e.err });
@@ -300,11 +258,7 @@ where
 						&counterparty_node_id,
 						LSPS2Message::Request(
 							request_id,
-							LSPS2Request::Buy(BuyRequest {
-								version,
-								opening_fee_params,
-								payment_size_msat,
-							}),
+							LSPS2Request::Buy(BuyRequest { opening_fee_params, payment_size_msat }),
 						)
 						.into(),
 					);
@@ -329,70 +283,6 @@ where
 		let mut id_bytes: [u8; 16] = [0; 16];
 		id_bytes.copy_from_slice(&bytes[0..16]);
 		u128::from_be_bytes(id_bytes)
-	}
-
-	fn handle_get_versions_response(
-		&self, request_id: RequestId, counterparty_node_id: &PublicKey, result: GetVersionsResponse,
-	) -> Result<(), LightningError> {
-		let outer_state_lock = self.per_peer_state.read().unwrap();
-		match outer_state_lock.get(counterparty_node_id) {
-			Some(inner_state_lock) => {
-				let mut peer_state = inner_state_lock.lock().unwrap();
-
-				let jit_channel_id =
-					peer_state.request_to_cid.remove(&request_id).ok_or(LightningError {
-						err: format!(
-							"Received get_versions response for an unknown request: {:?}",
-							request_id
-						),
-						action: ErrorAction::IgnoreAndLog(Level::Info),
-					})?;
-
-				let jit_channel = peer_state
-					.inbound_channels_by_id
-					.get_mut(&jit_channel_id)
-					.ok_or(LightningError {
-						err: format!(
-							"Received get_versions response for an unknown channel: {:?}",
-							jit_channel_id,
-						),
-						action: ErrorAction::IgnoreAndLog(Level::Info),
-					})?;
-
-				let token = jit_channel.config.token.clone();
-
-				let version = match jit_channel.versions_received(result.versions) {
-					Ok(version) => version,
-					Err(e) => {
-						peer_state.remove_inbound_channel(jit_channel_id);
-						return Err(e);
-					}
-				};
-
-				let request_id = crate::utils::generate_request_id(&self.entropy_source);
-				peer_state.insert_request(request_id.clone(), jit_channel_id);
-
-				self.pending_messages.enqueue(
-					counterparty_node_id,
-					LSPS2Message::Request(
-						request_id,
-						LSPS2Request::GetInfo(GetInfoRequest { version, token }),
-					)
-					.into(),
-				);
-			}
-			None => {
-				return Err(LightningError {
-					err: format!(
-						"Received get_versions response from unknown peer: {:?}",
-						counterparty_node_id
-					),
-					action: ErrorAction::IgnoreAndLog(Level::Info),
-				})
-			}
-		}
-
-		Ok(())
 	}
 
 	fn handle_get_info_response(
@@ -602,9 +492,6 @@ where
 	) -> Result<(), LightningError> {
 		match message {
 			LSPS2Message::Response(request_id, response) => match response {
-				LSPS2Response::GetVersions(result) => {
-					self.handle_get_versions_response(request_id, counterparty_node_id, result)
-				}
 				LSPS2Response::GetInfo(result) => {
 					self.handle_get_info_response(request_id, counterparty_node_id, result)
 				}

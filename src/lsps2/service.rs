@@ -29,13 +29,11 @@ use bitcoin::secp256k1::PublicKey;
 use core::ops::Deref;
 
 use crate::lsps2::msgs::{
-	BuyRequest, BuyResponse, GetInfoRequest, GetInfoResponse, GetVersionsResponse, LSPS2Message,
-	LSPS2Request, LSPS2Response, OpeningFeeParams, RawOpeningFeeParams,
+	BuyRequest, BuyResponse, GetInfoRequest, GetInfoResponse, LSPS2Message, LSPS2Request,
+	LSPS2Response, OpeningFeeParams, RawOpeningFeeParams,
 	LSPS2_BUY_REQUEST_INVALID_OPENING_FEE_PARAMS_ERROR_CODE,
-	LSPS2_BUY_REQUEST_INVALID_VERSION_ERROR_CODE,
 	LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_LARGE_ERROR_CODE,
 	LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_SMALL_ERROR_CODE,
-	LSPS2_GET_INFO_REQUEST_INVALID_VERSION_ERROR_CODE,
 	LSPS2_GET_INFO_REQUEST_UNRECOGNIZED_OR_STALE_TOKEN_ERROR_CODE,
 };
 
@@ -51,8 +49,6 @@ pub struct LSPS2ServiceConfig {
 	/// The maximum payment size you are willing to accept.
 	pub max_payment_size_msat: u64,
 }
-
-const SUPPORTED_SPEC_VERSIONS: [u16; 1] = [1];
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 struct InterceptedHTLC {
@@ -176,22 +172,14 @@ impl OutboundJITChannelState {
 
 struct OutboundJITChannel {
 	state: OutboundJITChannelState,
-	intercept_scid: u64,
-	cltv_expiry_delta: u32,
-	client_trusts_lsp: bool,
 	user_channel_id: u128,
 }
 
 impl OutboundJITChannel {
 	fn new(
-		intercept_scid: u64, cltv_expiry_delta: u32, client_trusts_lsp: bool,
-		payment_size_msat: Option<u64>, opening_fee_params: OpeningFeeParams,
-		user_channel_id: u128,
+		payment_size_msat: Option<u64>, opening_fee_params: OpeningFeeParams, user_channel_id: u128,
 	) -> Self {
 		Self {
-			intercept_scid,
-			cltv_expiry_delta,
-			client_trusts_lsp,
 			user_channel_id,
 			state: OutboundJITChannelState::new(payment_size_msat, opening_fee_params),
 		}
@@ -203,7 +191,7 @@ impl OutboundJITChannel {
 		self.state = self.state.htlc_intercepted(htlc)?;
 
 		match &self.state {
-			OutboundJITChannelState::AwaitingPayment { htlcs, payment_size_msat, .. } => {
+			OutboundJITChannelState::AwaitingPayment { .. } => {
 				// TODO: log that we received an htlc but are still awaiting payment
 				Ok(None)
 			}
@@ -260,10 +248,6 @@ impl PeerState {
 
 	fn insert_outbound_channel(&mut self, intercept_scid: u64, channel: OutboundJITChannel) {
 		self.outbound_channels_by_intercept_scid.insert(intercept_scid, channel);
-	}
-
-	fn remove_outbound_channel(&mut self, intercept_scid: u64) {
-		self.outbound_channels_by_intercept_scid.remove(&intercept_scid);
 	}
 }
 
@@ -405,9 +389,6 @@ where
 						}
 
 						let outbound_jit_channel = OutboundJITChannel::new(
-							intercept_scid,
-							cltv_expiry_delta,
-							client_trusts_lsp,
 							buy_request.payment_size_msat,
 							buy_request.opening_fee_params,
 							user_channel_id,
@@ -587,38 +568,9 @@ where
 		self.pending_events.enqueue(event);
 	}
 
-	fn handle_get_versions_request(
-		&self, request_id: RequestId, counterparty_node_id: &PublicKey,
-	) -> Result<(), LightningError> {
-		self.enqueue_response(
-			counterparty_node_id,
-			request_id,
-			LSPS2Response::GetVersions(GetVersionsResponse {
-				versions: SUPPORTED_SPEC_VERSIONS.to_vec(),
-			}),
-		);
-		Ok(())
-	}
-
 	fn handle_get_info_request(
 		&self, request_id: RequestId, counterparty_node_id: &PublicKey, params: GetInfoRequest,
 	) -> Result<(), LightningError> {
-		if !SUPPORTED_SPEC_VERSIONS.contains(&params.version) {
-			self.enqueue_response(
-				counterparty_node_id,
-				request_id,
-				LSPS2Response::GetInfoError(ResponseError {
-					code: LSPS2_GET_INFO_REQUEST_INVALID_VERSION_ERROR_CODE,
-					message: format!("version {} is not supported", params.version),
-					data: Some(format!("Supported versions are {:?}", SUPPORTED_SPEC_VERSIONS)),
-				}),
-			);
-			return Err(LightningError {
-				err: format!("client requested unsupported version {}", params.version),
-				action: ErrorAction::IgnoreAndLog(Level::Info),
-			});
-		}
-
 		let mut outer_state_lock = self.per_peer_state.write().unwrap();
 		let inner_state_lock: &mut Mutex<PeerState> =
 			outer_state_lock.entry(*counterparty_node_id).or_insert(Mutex::new(PeerState::new()));
@@ -630,7 +582,6 @@ where
 		self.enqueue_event(Event::LSPS2Service(LSPS2ServiceEvent::GetInfo {
 			request_id,
 			counterparty_node_id: *counterparty_node_id,
-			version: params.version,
 			token: params.token,
 		}));
 		Ok(())
@@ -639,22 +590,6 @@ where
 	fn handle_buy_request(
 		&self, request_id: RequestId, counterparty_node_id: &PublicKey, params: BuyRequest,
 	) -> Result<(), LightningError> {
-		if !SUPPORTED_SPEC_VERSIONS.contains(&params.version) {
-			self.enqueue_response(
-				counterparty_node_id,
-				request_id,
-				LSPS2Response::BuyError(ResponseError {
-					code: LSPS2_BUY_REQUEST_INVALID_VERSION_ERROR_CODE,
-					message: format!("version {} is not supported", params.version),
-					data: Some(format!("Supported versions are {:?}", SUPPORTED_SPEC_VERSIONS)),
-				}),
-			);
-			return Err(LightningError {
-				err: format!("client requested unsupported version {}", params.version),
-				action: ErrorAction::IgnoreAndLog(Level::Info),
-			});
-		}
-
 		if let Some(payment_size_msat) = params.payment_size_msat {
 			if payment_size_msat < self.config.min_payment_size_msat {
 				self.enqueue_response(
@@ -759,7 +694,6 @@ where
 
 		self.enqueue_event(Event::LSPS2Service(LSPS2ServiceEvent::BuyRequest {
 			request_id,
-			version: params.version,
 			counterparty_node_id: *counterparty_node_id,
 			opening_fee_params: params.opening_fee_params,
 			payment_size_msat: params.payment_size_msat,
@@ -781,9 +715,6 @@ where
 	) -> Result<(), LightningError> {
 		match message {
 			LSPS2Message::Request(request_id, request) => match request {
-				LSPS2Request::GetVersions(_) => {
-					self.handle_get_versions_request(request_id, counterparty_node_id)
-				}
 				LSPS2Request::GetInfo(params) => {
 					self.handle_get_info_request(request_id, counterparty_node_id, params)
 				}
