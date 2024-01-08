@@ -203,10 +203,14 @@ where
 		}
 	}
 
-	/// Initiate the creation of an invoice that when paid will open a channel
-	/// with enough inbound liquidity to be able to receive the payment.
+	/// Request the channel opening parameters from the LSP.
 	///
-	/// `counterparty_node_id` is the node_id of the LSP you would like to use.
+	/// This initiates the JIT-channel flow that, at the end of it, will have the LSP
+	/// open a channel with sufficient inbound liquidity to be able to receive the payment.
+	///
+	/// The user will receive the LSP's response via an [`OpeningParametersReady`] event.
+	///
+	/// `counterparty_node_id` is the `node_id` of the LSP you would like to use.
 	///
 	/// If `payment_size_msat` is [`Option::Some`] then the invoice will be for a fixed amount
 	/// and MPP can be used to pay it.
@@ -214,9 +218,11 @@ where
 	/// If `payment_size_msat` is [`Option::None`] then the invoice can be for an arbitrary amount
 	/// but MPP can no longer be used to pay it.
 	///
-	/// `token` is an optional String that will be provided to the LSP.
+	/// `token` is an optional `String` that will be provided to the LSP.
 	/// It can be used by the LSP as an API key, coupon code, or some other way to identify a user.
-	pub fn create_invoice(
+	///
+	/// [`OpeningParametersReady`]: crate::lsps2::event::LSPS2ClientEvent::OpeningParametersReady
+	pub fn request_opening_params(
 		&self, counterparty_node_id: PublicKey, payment_size_msat: Option<u64>,
 		token: Option<String>, user_channel_id: u128,
 	) {
@@ -239,14 +245,19 @@ where
 		);
 	}
 
-	/// Used by client to confirm which channel parameters to use for the JIT Channel buy request.
+	/// Confirms a set of chosen channel opening parameters to use for the JIT channel and
+	/// requests the necessary invoice generation parameters from the LSP.
+	///
+	/// Should be called in response to receiving a [`OpeningParametersReady`] event.
+	///
+	/// The user will receive the LSP's response via an [`InvoiceParametersReady`] event.
+	///
 	/// The client agrees to paying an opening fee equal to
 	/// `max(min_fee_msat, proportional*(payment_size_msat/1_000_000))`.
 	///
-	/// Should be called in response to receiving a [`LSPS2ClientEvent::GetInfoResponse`] event.
-	///
-	/// [`LSPS2ClientEvent::GetInfoResponse`]: crate::lsps2::event::LSPS2ClientEvent::GetInfoResponse
-	pub fn opening_fee_params_selected(
+	/// [`OpeningParametersReady`]: crate::lsps2::event::LSPS2ClientEvent::OpeningParametersReady
+	/// [`InvoiceParametersReady`]: crate::lsps2::event::LSPS2ClientEvent::InvoiceParametersReady
+	pub fn select_opening_params(
 		&self, counterparty_node_id: PublicKey, jit_channel_id: u128,
 		opening_fee_params: OpeningFeeParams,
 	) -> Result<(), APIError> {
@@ -334,7 +345,7 @@ where
 				}
 
 				self.pending_events.enqueue(Event::LSPS2Client(
-					LSPS2ClientEvent::GetInfoResponse {
+					LSPS2ClientEvent::OpeningParametersReady {
 						counterparty_node_id: *counterparty_node_id,
 						opening_fee_params_menu: result.opening_fee_params_menu,
 						min_payment_size_msat: result.min_payment_size_msat,
@@ -442,7 +453,7 @@ where
 
 				if let Ok(intercept_scid) = result.intercept_scid.to_scid() {
 					self.pending_events.enqueue(Event::LSPS2Client(
-						LSPS2ClientEvent::InvoiceGenerationReady {
+						LSPS2ClientEvent::InvoiceParametersReady {
 							counterparty_node_id: *counterparty_node_id,
 							intercept_scid,
 							cltv_expiry_delta: result.lsp_cltv_expiry_delta,
