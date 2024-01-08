@@ -23,6 +23,7 @@ use lightning::util::logger::Level;
 
 use bitcoin::secp256k1::PublicKey;
 
+use core::default::Default;
 use core::ops::Deref;
 
 use crate::lsps2::msgs::{
@@ -32,7 +33,21 @@ use crate::lsps2::msgs::{
 
 /// Client-side configuration options for JIT channels.
 #[derive(Clone, Debug, Copy)]
-pub struct LSPS2ClientConfig {}
+pub struct LSPS2ClientConfig {
+	/// Trust the LSP to create a valid channel funding transaction and have it confirmed on-chain.
+	///
+	/// TODO: If set to `false`, we'll only release the pre-image after we see an on-chain
+	/// confirmation of the channel's funding transaction.
+	///
+	/// Defaults to `true`.
+	pub client_trusts_lsp: bool,
+}
+
+impl Default for LSPS2ClientConfig {
+	fn default() -> Self {
+		Self { client_trusts_lsp: true }
+	}
+}
 
 struct ChannelStateError(String);
 
@@ -167,7 +182,7 @@ where
 	pending_messages: Arc<MessageQueue>,
 	pending_events: Arc<EventQueue>,
 	per_peer_state: RwLock<HashMap<PublicKey, Mutex<PeerState>>>,
-	_config: LSPS2ClientConfig,
+	config: LSPS2ClientConfig,
 }
 
 impl<ES: Deref> LSPS2ClientHandler<ES>
@@ -184,7 +199,7 @@ where
 			pending_messages,
 			pending_events,
 			per_peer_state: RwLock::new(HashMap::new()),
-			_config: config,
+			config,
 		}
 	}
 
@@ -405,6 +420,18 @@ where
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					})?;
 
+				// Reject the buy response if we disallow client_trusts_lsp and the LSP requires
+				// it.
+				if !self.config.client_trusts_lsp && result.client_trusts_lsp {
+					peer_state.remove_inbound_channel(jit_channel_id);
+					return Err(LightningError {
+						err: format!(
+							"Aborting JIT channel flow as the LSP requires 'client_trusts_lsp' mode, which we disallow"
+						),
+						action: ErrorAction::IgnoreAndLog(Level::Info),
+					});
+				}
+
 				if let Err(e) = jit_channel.invoice_params_received(
 					result.client_trusts_lsp,
 					result.intercept_scid.clone(),
@@ -420,7 +447,6 @@ where
 							intercept_scid,
 							cltv_expiry_delta: result.lsp_cltv_expiry_delta,
 							payment_size_msat: jit_channel.config.payment_size_msat,
-							client_trusts_lsp: result.client_trusts_lsp,
 							user_channel_id: jit_channel.config.user_id,
 						},
 					));

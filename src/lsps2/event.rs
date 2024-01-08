@@ -58,8 +58,6 @@ pub enum LSPS2ClientEvent {
 		cltv_expiry_delta: u32,
 		/// The initial payment size you specified.
 		payment_size_msat: Option<u64>,
-		/// The trust model the LSP expects.
-		client_trusts_lsp: bool,
 		/// The `user_channel_id` value passed in to [`LSPS2ClientHandler::create_invoice`].
 		///
 		/// [`LSPS2ClientHandler::create_invoice`]: crate::lsps2::client::LSPS2ClientHandler::create_invoice
