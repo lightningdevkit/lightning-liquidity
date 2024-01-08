@@ -241,8 +241,8 @@ where
 	///
 	/// `counterparty_node_id` is the node_id of the LSP you would like to use.
 	///
-	/// 'channel_id' is the id used to uniquely identify the channel with counterparty node.
-	pub fn request_for_info(&self, counterparty_node_id: PublicKey, channel_id: u128) {
+	/// `channel_id` is the id used to uniquely identify the channel with counterparty node.
+	pub fn send_get_info_request(&self, counterparty_node_id: PublicKey, channel_id: u128) {
 		let channel = InboundCRChannel::new(channel_id);
 
 		let mut outer_state_lock = self.per_peer_state.write().unwrap();
@@ -300,7 +300,7 @@ where
 
 				self.pending_events.enqueue(Event::LSPS1Client(LSPS1ClientEvent::GetInfoResponse {
 					id: channel_id,
-					request_id,
+
 					counterparty_node_id: *counterparty_node_id,
 					website: result.website,
 					options_supported: result.options,

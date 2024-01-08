@@ -33,8 +33,6 @@ pub enum LSPS1ClientEvent {
 		///
 		/// [`LSPS1ClientHandler::place_order`]: crate::lsps1::client::LSPS1ClientHandler::place_order
 		id: u128,
-		/// An identifier to track messages received.
-		request_id: RequestId,
 		/// The node id of the LSP that provided this response.
 		counterparty_node_id: PublicKey,
 		/// The website of the LSP.
@@ -47,7 +45,7 @@ pub enum LSPS1ClientEvent {
 	/// When the payment is confirmed, the LSP will open a channel to you
 	/// with the below agreed upon parameters.
 	///
-	/// You must pay the invoice if you want to continue and then
+	/// You must pay the invoice or onchain address if you want to continue and then
 	/// call [`LSPS1ClientHandler::check_order_status`] with the order id
 	/// to get information from LSP about progress of the order.
 	///
@@ -76,15 +74,15 @@ pub enum LSPS1ServiceEvent {
 	/// A client has selected the parameters to use from the supported options of the LSP
 	/// and would like to open a channel with the given payment parameters.
 	///
-	/// You must call [`LSPS1ServiceHandler::send_invoice_for_order`] to
-	/// generate a complete invoice including the details regarding the
+	/// You must call [`LSPS1ServiceHandler::send_payment_details`] to
+	/// send order parameters including the details regarding the
 	/// payment and order id for this order for the client.
 	///
-	/// [`LSPS1ServiceHandler::send_invoice_for_order`]: crate::lsps1::service::LSPS1ServiceHandler::send_invoice_for_order
-	CreateInvoice {
-		/// An identifier that must be passed to [`LSPS1ServiceHandler::send_invoice_for_order`].
+	/// [`LSPS1ServiceHandler::send_payment_details`]: crate::lsps1::service::LSPS1ServiceHandler::send_payment_details
+	RequestForPaymentDetails {
+		/// An identifier that must be passed to [`LSPS1ServiceHandler::send_payment_details`].
 		///
-		/// [`LSPS1ServiceHandler::send_invoice_for_order`]: crate::lsps1::service::LSPS1ServiceHandler::send_invoice_for_order
+		/// [`LSPS1ServiceHandler::send_payment_details`]: crate::lsps1::service::LSPS1ServiceHandler::send_payment_details
 		request_id: RequestId,
 		/// The node id of the client making the information request.
 		counterparty_node_id: PublicKey,

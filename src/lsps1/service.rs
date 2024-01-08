@@ -64,7 +64,7 @@ enum OutboundRequestState {
 }
 
 impl OutboundRequestState {
-	fn create_payment_invoice(&self) -> Result<Self, ChannelStateError> {
+	fn awaiting_payment(&self) -> Result<Self, ChannelStateError> {
 		match self {
 			OutboundRequestState::OrderCreated { order_id } => {
 				Ok(OutboundRequestState::WaitingPayment { order_id: order_id.clone() })
@@ -96,8 +96,8 @@ impl OutboundCRChannel {
 			config: OutboundLSPS1Config { order, created_at, expires_at, payment },
 		}
 	}
-	fn create_payment_invoice(&mut self) -> Result<(), LightningError> {
-		self.state = self.state.create_payment_invoice()?;
+	fn awaiting_payment(&mut self) -> Result<(), LightningError> {
+		self.state = self.state.awaiting_payment()?;
 		Ok(())
 	}
 
@@ -224,21 +224,23 @@ where
 			.pending_requests
 			.insert(request_id.clone(), LSPS1Request::CreateOrder(params.clone()));
 
-		self.pending_events.enqueue(Event::LSPS1Service(LSPS1ServiceEvent::CreateInvoice {
-			request_id,
-			counterparty_node_id: *counterparty_node_id,
-			order: params.order,
-		}));
+		self.pending_events.enqueue(Event::LSPS1Service(
+			LSPS1ServiceEvent::RequestForPaymentDetails {
+				request_id,
+				counterparty_node_id: *counterparty_node_id,
+				order: params.order,
+			},
+		));
 
 		Ok(())
 	}
 
-	/// Used by LSP to send invoice containing details regarding the channel fees and payment information.
+	/// Used by LSP to send response containing details regarding the channel fees and payment information.
 	///
-	/// Should be called in response to receiving a [`LSPS1ServiceEvent::CreateInvoice`] event.
+	/// Should be called in response to receiving a [`LSPS1ServiceEvent::RequestForPaymentDetails`] event.
 	///
-	/// [`LSPS1ServiceEvent::CreateInvoice`]: crate::lsps1::event::LSPS1ServiceEvent::CreateInvoice
-	pub fn send_invoice_for_order(
+	/// [`LSPS1ServiceEvent::RequestForPaymentDetails`]: crate::lsps1::event::LSPS1ServiceEvent::RequestForPaymentDetails
+	pub fn send_payment_details(
 		&self, request_id: RequestId, counterparty_node_id: &PublicKey, payment: OrderPayment,
 		created_at: chrono::DateTime<Utc>, expires_at: chrono::DateTime<Utc>,
 	) -> Result<(), APIError> {
@@ -315,7 +317,7 @@ where
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					})?;
 
-				if let Err(e) = outbound_channel.create_payment_invoice() {
+				if let Err(e) = outbound_channel.awaiting_payment() {
 					peer_state_lock.outbound_channels_by_order_id.remove(&params.order_id);
 					self.pending_events.enqueue(Event::LSPS1Service(LSPS1ServiceEvent::Refund {
 						request_id,
