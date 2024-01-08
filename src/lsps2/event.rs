@@ -25,20 +25,6 @@ pub enum LSPS2ClientEvent {
 	///
 	/// [`LSPS2ClientHandler::select_opening_params`]: crate::lsps2::client::LSPS2ClientHandler::select_opening_params
 	OpeningParametersReady {
-		/// A user-specified identifier used to track the channel open.
-		///
-		/// This is the same value as previously passed to
-		/// [`LSPS2ClientHandler::request_opening_params`].
-		///
-		/// [`LSPS2ClientHandler::request_opening_params`]: crate::lsps2::client::LSPS2ClientHandler::request_opening_params
-		user_channel_id: u128,
-		/// This is a randomly generated identifier used to track the JIT channel state.
-		///
-		/// It is not related in anyway to the eventual lightning channel id, but needs to be
-		/// given to [`LSPS2ClientHandler::select_opening_params`].
-		///
-		/// [`LSPS2ClientHandler::select_opening_params`]: crate::lsps2::client::LSPS2ClientHandler::select_opening_params
-		jit_channel_id: u128,
 		/// The node id of the LSP that provided this response.
 		counterparty_node_id: PublicKey,
 		/// The menu of fee parameters the LSP is offering at this time.
