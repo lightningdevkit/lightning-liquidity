@@ -21,12 +21,13 @@ use bitcoin::secp256k1::PublicKey;
 pub enum LSPS1ClientEvent {
 	/// Information from the LSP about their supported protocol options.
 	///
-	/// You must check whether LSP supports the params the client wants and then call
+	/// You must check whether LSP supports the parameters the client wants and then call
 	/// [`LSPS1ClientHandler::place_order`] to place an order.
 	///
-	/// [`LSPS1ClientHandler::place_order`] : crate::lsps1::client::LSPS1ClientHandler::place_order
+	/// [`LSPS1ClientHandler::place_order`]: crate::lsps1::client::LSPS1ClientHandler::place_order
 	GetInfoResponse {
 		/// This is a randomly generated identifier used to track the channel state.
+		///
 		/// It is not related in anyway to the eventual lightning channel id.
 		/// It needs to be passed to [`LSPS1ClientHandler::place_order`].
 		///
@@ -43,7 +44,7 @@ pub enum LSPS1ClientEvent {
 	},
 	/// Confirmation from the LSP about the order created by the client.
 	///
-	/// When the invoice is paid, the LSP will open a channel to you
+	/// When the payment is confirmed, the LSP will open a channel to you
 	/// with the below agreed upon parameters.
 	///
 	/// You must pay the invoice if you want to continue and then
@@ -72,8 +73,8 @@ pub enum LSPS1ClientEvent {
 /// An event which an LSPS1 server should take some action in response to.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LSPS1ServiceEvent {
-	/// A client has selected the parameters to use from the supported options of LSP
-	/// and would like to open a channel with the given invoice.
+	/// A client has selected the parameters to use from the supported options of the LSP
+	/// and would like to open a channel with the given payment parameters.
 	///
 	/// You must call [`LSPS1ServiceHandler::send_invoice_for_order`] to
 	/// generate a complete invoice including the details regarding the
@@ -97,7 +98,7 @@ pub enum LSPS1ServiceEvent {
 	/// You must call [`LSPS1ServiceHandler::update_order_status`] to update the client
 	/// regarding the status of the payment and order.
 	///
-	/// [`LSPS1ServiceHandler::send_invoice_for_order`]: crate::lsps1::service::LSPS1ServiceHandler::send_invoice_for_order
+	/// [`LSPS1ServiceHandler::update_order_status`]: crate::lsps1::service::LSPS1ServiceHandler::update_order_status
 	CheckPaymentConfirmation {
 		/// An identifier that must be passed to [`LSPS1ServiceHandler::update_order_status`].
 		///

@@ -237,13 +237,11 @@ where
 		}
 	}
 
-	/// Initiate the creation of an invoice that when paid will open a channel
-	/// with enough inbound liquidity to be able to receive the payment.
+	/// Retrieve information from the LSP regarding the options supported.
 	///
 	/// `counterparty_node_id` is the node_id of the LSP you would like to use.
 	///
-	/// `token` is an optional String that will be provided to the LSP.
-	/// It can be used by the LSP as an API key, coupon code, or some other way to identify a user.
+	/// 'channel_id' is the id used to uniquely identify the channel with counterparty node.
 	pub fn request_for_info(&self, counterparty_node_id: PublicKey, channel_id: u128) {
 		let channel = InboundCRChannel::new(channel_id);
 
@@ -321,9 +319,8 @@ where
 		Ok(())
 	}
 
-	/// Used by client to place an order to LSP with the provided parameters.
-	/// The client agrees to paying an channel fees as per requested by
-	/// the LSP.
+	/// Places an order with the connected LSP given its `counterparty_node_id`.
+	/// The client agrees to paying channel fees according to the provided parameters.
 	///
 	/// Should be called in response to receiving a [`LSPS1ClientEvent::GetInfoResponse`] event.
 	///
@@ -481,12 +478,12 @@ where
 		}
 	}
 
-	/// Used by client to check whether payment is received by LSP and status of order.
+	/// Queries the status of a pending payment, i.e., whether a payment has been received by the LSP.
 	///
 	/// Should be called in response to receiving a [`LSPS1ClientEvent::DisplayOrder`] event.
 	///
 	/// [`LSPS1ClientEvent::DisplayOrder`]: crate::lsps1::event::LSPS1ClientEvent::DisplayOrder
-	fn check_order_status(
+	pub fn check_order_status(
 		&self, counterparty_node_id: &PublicKey, order_id: OrderId, channel_id: u128,
 	) -> Result<(), APIError> {
 		let outer_state_lock = self.per_peer_state.write().unwrap();
