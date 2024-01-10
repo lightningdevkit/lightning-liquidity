@@ -93,7 +93,9 @@ impl OutboundJITChannelState {
 		}
 	}
 
-	fn htlc_intercepted(&self, htlc: InterceptedHTLC) -> Result<Self, ChannelStateError> {
+	fn htlc_intercepted(
+		&self, htlc: InterceptedHTLC, config: &LSPS2ServiceConfig,
+	) -> Result<Self, ChannelStateError> {
 		match self {
 			OutboundJITChannelState::AwaitingPayment {
 				htlcs,
@@ -107,24 +109,46 @@ impl OutboundJITChannelState {
 				let total_expected_outbound_amount_msat =
 					htlcs.iter().map(|htlc| htlc.expected_outbound_amount_msat).sum();
 
-				let expected_payment_size_msat =
-					payment_size_msat.unwrap_or(total_expected_outbound_amount_msat);
+				let (expected_payment_size_msat, mpp_mode) =
+					if let Some(payment_size_msat) = payment_size_msat {
+						(*payment_size_msat, true)
+					} else {
+						debug_assert_eq!(htlcs.len(), 1);
+						if htlcs.len() != 1 {
+							return Err(ChannelStateError(
+								format!("Paying via multiple HTLCs is disallowed in \"no-MPP+var-invoice\" mode.")
+							));
+						}
+						(total_expected_outbound_amount_msat, false)
+					};
+
+				if expected_payment_size_msat < config.min_payment_size_msat
+					|| expected_payment_size_msat > config.max_payment_size_msat
+				{
+					return Err(ChannelStateError(
+							format!("Payment size violates our limits: expected_payment_size_msat = {}, min_payment_size_msat = {}, max_payment_size_msat = {}",
+									expected_payment_size_msat,
+									config.min_payment_size_msat,
+									config.max_payment_size_msat
+							)));
+				}
 
 				let opening_fee_msat = compute_opening_fee(
 					expected_payment_size_msat,
 					*min_fee_msat,
 					(*proportional_fee).into(),
 				).ok_or(ChannelStateError(
-					format!("Could not compute valid opening fee with min_fee_msat = {}, proportional = {}, and total_expected_outbound_amount_msat = {}", 
+					format!("Could not compute valid opening fee with min_fee_msat = {}, proportional = {}, and expected_payment_size_msat = {}",
 						min_fee_msat,
 						proportional_fee,
-						total_expected_outbound_amount_msat
+						expected_payment_size_msat
 					)
 				))?;
 
 				let amt_to_forward_msat =
 					expected_payment_size_msat.saturating_sub(opening_fee_msat);
 
+				// Go ahead and open the channel if we intercepted sufficient HTLCs.
 				if total_expected_outbound_amount_msat >= expected_payment_size_msat
 					&& amt_to_forward_msat > 0
 				{
@@ -134,8 +158,7 @@ impl OutboundJITChannelState {
 						amt_to_forward_msat,
 					})
 				} else {
-					// payment size being specified means MPP is supported
-					if payment_size_msat.is_some() {
+					if mpp_mode {
 						Ok(OutboundJITChannelState::AwaitingPayment {
 							min_fee_msat: *min_fee_msat,
 							proportional_fee: *proportional_fee,
@@ -143,12 +166,14 @@ impl OutboundJITChannelState {
 							payment_size_msat: *payment_size_msat,
 						})
 					} else {
-						Err(ChannelStateError("HTLC is too small to pay opening fee".to_string()))
+						Err(ChannelStateError(
+							"Intercepted HTLC is too small to pay opening fee".to_string(),
+						))
 					}
 				}
 			}
 			state => Err(ChannelStateError(format!(
-				"Invoice params received when JIT Channel was in state: {:?}",
+				"Intercepted HTLC when JIT Channel was in state: {:?}",
 				state
 			))),
 		}
@@ -186,9 +211,9 @@ impl OutboundJITChannel {
 	}
 
 	fn htlc_intercepted(
-		&mut self, htlc: InterceptedHTLC,
+		&mut self, htlc: InterceptedHTLC, config: &LSPS2ServiceConfig,
 	) -> Result<Option<(u64, u64)>, LightningError> {
-		self.state = self.state.htlc_intercepted(htlc)?;
+		self.state = self.state.htlc_intercepted(htlc, config)?;
 
 		match &self.state {
 			OutboundJITChannelState::AwaitingPayment { .. } => {
@@ -447,7 +472,7 @@ where
 						peer_state.outbound_channels_by_intercept_scid.get_mut(&intercept_scid)
 					{
 						let htlc = InterceptedHTLC { intercept_id, expected_outbound_amount_msat };
-						match jit_channel.htlc_intercepted(htlc) {
+						match jit_channel.htlc_intercepted(htlc, &self.config) {
 							Ok(Some((opening_fee_msat, amt_to_forward_msat))) => {
 								self.enqueue_event(Event::LSPS2Service(
 									LSPS2ServiceEvent::OpenChannel {
