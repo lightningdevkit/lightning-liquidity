@@ -221,6 +221,7 @@ where
 	C::Target: Filter,
 	ES::Target: EntropySource,
 {
+	/// Constructs an `LSPS1ClientHandler`.
 	pub(crate) fn new(
 		entropy_source: ES, pending_messages: Arc<MessageQueue>, pending_events: Arc<EventQueue>,
 		channel_manager: CM, chain_source: Option<C>, config: LSPS1ClientConfig,
@@ -236,7 +237,12 @@ where
 		}
 	}
 
-	fn request_for_info(&self, counterparty_node_id: PublicKey, channel_id: u128) {
+	/// Retrieve information from the LSP regarding the options supported.
+	///
+	/// `counterparty_node_id` is the node_id of the LSP you would like to use.
+	///
+	/// 'channel_id' is the id used to uniquely identify the channel with counterparty node.
+	pub fn request_for_info(&self, counterparty_node_id: PublicKey, channel_id: u128) {
 		let channel = InboundCRChannel::new(channel_id);
 
 		let mut outer_state_lock = self.per_peer_state.write().unwrap();
@@ -313,7 +319,13 @@ where
 		Ok(())
 	}
 
-	fn place_order(
+	/// Places an order with the connected LSP given its `counterparty_node_id`.
+	/// The client agrees to paying channel fees according to the provided parameters.
+	///
+	/// Should be called in response to receiving a [`LSPS1ClientEvent::GetInfoResponse`] event.
+	///
+	/// [`LSPS1ClientEvent::GetInfoResponse`]: crate::lsps1::event::LSPS1ClientEvent::GetInfoResponse
+	pub fn place_order(
 		&self, channel_id: u128, counterparty_node_id: &PublicKey, order: OrderParams,
 	) -> Result<(), APIError> {
 		let outer_state_lock = self.per_peer_state.write().unwrap();
@@ -466,7 +478,12 @@ where
 		}
 	}
 
-	fn check_order_status(
+	/// Queries the status of a pending payment, i.e., whether a payment has been received by the LSP.
+	///
+	/// Should be called in response to receiving a [`LSPS1ClientEvent::DisplayOrder`] event.
+	///
+	/// [`LSPS1ClientEvent::DisplayOrder`]: crate::lsps1::event::LSPS1ClientEvent::DisplayOrder
+	pub fn check_order_status(
 		&self, counterparty_node_id: &PublicKey, order_id: OrderId, channel_id: u128,
 	) -> Result<(), APIError> {
 		let outer_state_lock = self.per_peer_state.write().unwrap();

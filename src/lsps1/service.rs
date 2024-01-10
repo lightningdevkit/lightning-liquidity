@@ -152,6 +152,7 @@ where
 	C::Target: Filter,
 	ES::Target: EntropySource,
 {
+	/// Constructs a `LSPS1ServiceHandler`.
 	pub(crate) fn new(
 		entropy_source: ES, pending_messages: Arc<MessageQueue>, pending_events: Arc<EventQueue>,
 		channel_manager: CM, chain_source: Option<C>, config: LSPS1ServiceConfig,
@@ -232,7 +233,12 @@ where
 		Ok(())
 	}
 
-	fn send_invoice_for_order(
+	/// Used by LSP to send invoice containing details regarding the channel fees and payment information.
+	///
+	/// Should be called in response to receiving a [`LSPS1ServiceEvent::CreateInvoice`] event.
+	///
+	/// [`LSPS1ServiceEvent::CreateInvoice`]: crate::lsps1::event::LSPS1ServiceEvent::CreateInvoice
+	pub fn send_invoice_for_order(
 		&self, request_id: RequestId, counterparty_node_id: &PublicKey, payment: OrderPayment,
 		created_at: chrono::DateTime<Utc>, expires_at: chrono::DateTime<Utc>,
 	) -> Result<(), APIError> {
@@ -342,7 +348,15 @@ where
 		Ok(())
 	}
 
-	fn update_order_status(
+	/// Used by LSP to give details to client regarding the status of channel opening.
+	/// Called to respond to client's GetOrder request.
+	/// The LSP continously polls for checking payment confirmation on-chain or lighting
+	/// and then responds to client request.
+	///
+	/// Should be called in response to receiving a [`LSPS1ServiceEvent::CheckPaymentConfirmation`] event.
+	///
+	/// [`LSPS1ServiceEvent::CheckPaymentConfirmation`]: crate::lsps1::event::LSPS1ServiceEvent::CheckPaymentConfirmation
+	pub fn update_order_status(
 		&self, request_id: RequestId, counterparty_node_id: PublicKey, order_id: OrderId,
 		order_state: OrderState, channel: Option<ChannelInfo>,
 	) -> Result<(), APIError> {
