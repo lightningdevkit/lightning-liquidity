@@ -32,7 +32,7 @@ pub enum LSPS1ClientEvent {
 		/// It needs to be passed to [`LSPS1ClientHandler::place_order`].
 		///
 		/// [`LSPS1ClientHandler::place_order`]: crate::lsps1::client::LSPS1ClientHandler::place_order
-		id: u128,
+		user_channel_id: u128,
 		/// The node id of the LSP that provided this response.
 		counterparty_node_id: PublicKey,
 		/// The website of the LSP.
@@ -56,7 +56,7 @@ pub enum LSPS1ClientEvent {
 		/// It needs to be passed to [`LSPS1ClientHandler::check_order_status`].
 		///
 		/// [`LSPS1ClientHandler::check_order_status`]: crate::lsps1::client::LSPS1ClientHandler::check_order_status
-		id: u128,
+		user_channel_id: u128,
 		/// The node id of the LSP.
 		counterparty_node_id: PublicKey,
 		/// The order created by client and approved by LSP.
