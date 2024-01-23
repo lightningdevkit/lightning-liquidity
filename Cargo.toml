@@ -13,8 +13,8 @@ std = ["lightning/std", "bitcoin/std"]
 no-std = ["hashbrown", "lightning/no-std", "bitcoin/no-std", "core2/alloc"]
 
 [dependencies]
-lightning = { version = "0.0.120", default-features = false, features = ["max_level_trace"] }
-lightning-invoice = "0.28.0"
+lightning = { version = "0.0.121", default-features = false, features = ["max_level_trace"] }
+lightning-invoice = "0.29.0"
 bitcoin = { version = "0.30.2", default-features = false }
 hashbrown = { version = "0.8", optional = true }
 core2 = { version = "0.3.0", optional = true, default-features = false }
