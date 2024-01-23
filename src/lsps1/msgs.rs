@@ -121,8 +121,6 @@ pub struct CreateOrderResponse {
 /// An object representing the state of an order.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub enum OrderState {
-	/// TODO: this is superfluous and should likely be removed.
-	Requested,
 	/// The order has been created.
 	Created,
 	/// The LSP has opened the channel and published the funding transaction.
