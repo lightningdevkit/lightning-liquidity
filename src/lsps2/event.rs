@@ -20,17 +20,11 @@ use bitcoin::secp256k1::PublicKey;
 pub enum LSPS2ClientEvent {
 	/// Information from the LSP about their current fee rates and channel parameters.
 	///
-	/// You must call [`LSPS2ClientHandler::opening_fee_params_selected`] with the fee parameter
+	/// You must call [`LSPS2ClientHandler::select_opening_params`] with the fee parameter
 	/// you want to use if you wish to proceed opening a channel.
 	///
-	/// [`LSPS2ClientHandler::opening_fee_params_selected`]: crate::lsps2::client::LSPS2ClientHandler::opening_fee_params_selected
-	GetInfoResponse {
-		/// This is a randomly generated identifier used to track the JIT channel state.
-		/// It is not related in anyway to the eventual lightning channel id.
-		/// It needs to be passed to [`LSPS2ClientHandler::opening_fee_params_selected`].
-		///
-		/// [`LSPS2ClientHandler::opening_fee_params_selected`]: crate::lsps2::client::LSPS2ClientHandler::opening_fee_params_selected
-		jit_channel_id: u128,
+	/// [`LSPS2ClientHandler::select_opening_params`]: crate::lsps2::client::LSPS2ClientHandler::select_opening_params
+	OpeningParametersReady {
 		/// The node id of the LSP that provided this response.
 		counterparty_node_id: PublicKey,
 		/// The menu of fee parameters the LSP is offering at this time.
@@ -40,16 +34,20 @@ pub enum LSPS2ClientEvent {
 		min_payment_size_msat: u64,
 		/// The max payment size allowed when opening the channel.
 		max_payment_size_msat: u64,
-		/// The user_channel_id value passed in to [`LSPS2ClientHandler::create_invoice`].
-		///
-		/// [`LSPS2ClientHandler::create_invoice`]: crate::lsps2::client::LSPS2ClientHandler::create_invoice
-		user_channel_id: u128,
 	},
-	/// Use the provided fields to generate an invoice and give to payer.
+	/// Provides the necessary information to generate a payable invoice that then may be given to
+	/// the payer.
 	///
-	/// When the invoice is paid the LSP will open a channel to you
-	/// with the previously agreed upon parameters.
-	InvoiceGenerationReady {
+	/// When the invoice is paid, the LSP will open a channel with the previously agreed upon
+	/// parameters to you.
+	InvoiceParametersReady {
+		/// A user-specified identifier used to track the channel open.
+		///
+		/// This is the same value as previously passed to
+		/// [`LSPS2ClientHandler::select_opening_params`].
+		///
+		/// [`LSPS2ClientHandler::select_opening_params`]: crate::lsps2::client::LSPS2ClientHandler::select_opening_params
+		user_channel_id: u128,
 		/// The node id of the LSP.
 		counterparty_node_id: PublicKey,
 		/// The intercept short channel id to use in the route hint.
@@ -58,12 +56,6 @@ pub enum LSPS2ClientEvent {
 		cltv_expiry_delta: u32,
 		/// The initial payment size you specified.
 		payment_size_msat: Option<u64>,
-		/// The trust model the LSP expects.
-		client_trusts_lsp: bool,
-		/// The `user_channel_id` value passed in to [`LSPS2ClientHandler::create_invoice`].
-		///
-		/// [`LSPS2ClientHandler::create_invoice`]: crate::lsps2::client::LSPS2ClientHandler::create_invoice
-		user_channel_id: u128,
 	},
 }
 
