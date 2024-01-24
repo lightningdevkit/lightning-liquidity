@@ -37,10 +37,6 @@ pub enum LSPS2ClientEvent {
 		/// The menu of fee parameters the LSP is offering at this time.
 		/// You must select one of these if you wish to proceed.
 		opening_fee_params_menu: Vec<OpeningFeeParams>,
-		/// The min payment size allowed when opening the channel.
-		min_payment_size_msat: u64,
-		/// The max payment size allowed when opening the channel.
-		max_payment_size_msat: u64,
 	},
 	/// Provides the necessary information to generate a payable invoice that then may be given to
 	/// the payer.
