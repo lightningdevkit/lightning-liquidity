@@ -36,7 +36,7 @@ pub struct OptionsSupported {
 	/// The minimum number of block confirmations before the LSP accepts a channel as confirmed.
 	pub min_channel_confirmations: u8,
 	/// The minimum number of block confirmations before the LSP accepts an on-chain payment as confirmed.
-	pub min_onchain_payment_confirmations: u8,
+	pub min_onchain_payment_confirmations: Option<u8>,
 	/// Indicates if the LSP supports zero reserve.
 	pub supports_zero_channel_reserve: bool,
 	/// Indicates the minimum amount of satoshi that is required for the LSP to accept a payment
@@ -121,8 +121,6 @@ pub struct CreateOrderResponse {
 /// An object representing the state of an order.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub enum OrderState {
-	/// TODO: this is superfluous and should likely be removed.
-	Requested,
 	/// The order has been created.
 	Created,
 	/// The LSP has opened the channel and published the funding transaction.
@@ -147,7 +145,7 @@ pub struct OrderPayment {
 	pub onchain_address: String,
 	/// The minimum number of block confirmations that are required for the on-chain payment to be
 	/// considered confirmed.
-	pub min_onchain_payment_confirmations: u8,
+	pub min_onchain_payment_confirmations: Option<u8>,
 	/// The minimum fee rate for the on-chain payment in case the client wants the payment to be
 	/// confirmed without a confirmation.
 	pub min_fee_for_0conf: u8,
