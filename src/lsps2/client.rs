@@ -27,25 +27,17 @@ use core::default::Default;
 use core::ops::Deref;
 
 use crate::lsps2::msgs::{
-	BuyRequest, BuyResponse, GetInfoRequest, GetInfoResponse, LSPS2Message,
-	LSPS2Request, LSPS2Response, OpeningFeeParams,
+	BuyRequest, BuyResponse, GetInfoRequest, GetInfoResponse, LSPS2Message, LSPS2Request,
+	LSPS2Response, OpeningFeeParams,
 };
 
 /// Client-side configuration options for JIT channels.
 #[derive(Clone, Debug, Copy)]
-pub struct LSPS2ClientConfig {
-	/// Trust the LSP to create a valid channel funding transaction and have it confirmed on-chain.
-	///
-	/// TODO: If set to `false`, we'll only release the pre-image after we see an on-chain
-	/// confirmation of the channel's funding transaction.
-	///
-	/// Defaults to `true`.
-	pub client_trusts_lsp: bool,
-}
+pub struct LSPS2ClientConfig {}
 
 impl Default for LSPS2ClientConfig {
 	fn default() -> Self {
-		Self { client_trusts_lsp: true }
+		Self {}
 	}
 }
 
@@ -73,6 +65,12 @@ impl PeerState {
 }
 
 /// The main object allowing to send and receive LSPS2 messages.
+///
+/// Note that currently only the 'client-trusts-LSP' trust model is supported, i.e., we don't
+/// provide any additional API guidance to allow withholding the preimage until the channel is
+/// opened. Please refer to the [`LSPS2 specification`] for more information.
+///
+/// [`LSPS2 specification`]: https://github.com/BitcoinAndLightningLayerSpecs/lsp/tree/main/LSPS2#trust-models
 pub struct LSPS2ClientHandler<ES: Deref>
 where
 	ES::Target: EntropySource,
@@ -81,7 +79,7 @@ where
 	pending_messages: Arc<MessageQueue>,
 	pending_events: Arc<EventQueue>,
 	per_peer_state: RwLock<HashMap<PublicKey, Mutex<PeerState>>>,
-	config: LSPS2ClientConfig,
+	_config: LSPS2ClientConfig,
 }
 
 impl<ES: Deref> LSPS2ClientHandler<ES>
@@ -91,14 +89,14 @@ where
 	/// Constructs an `LSPS2ClientHandler`.
 	pub(crate) fn new(
 		entropy_source: ES, pending_messages: Arc<MessageQueue>, pending_events: Arc<EventQueue>,
-		config: LSPS2ClientConfig,
+		_config: LSPS2ClientConfig,
 	) -> Self {
 		Self {
 			entropy_source,
 			pending_messages,
 			pending_events,
 			per_peer_state: RwLock::new(HashMap::new()),
-			config,
+			_config,
 		}
 	}
 
@@ -276,17 +274,6 @@ where
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					})?;
 
-				// Reject the buy response if we disallow client_trusts_lsp and the LSP requires
-				// it.
-				if !self.config.client_trusts_lsp && result.client_trusts_lsp {
-					return Err(LightningError {
-						err: format!(
-							"Aborting JIT channel flow as the LSP requires 'client_trusts_lsp' mode, which we disallow"
-						),
-						action: ErrorAction::IgnoreAndLog(Level::Info),
-					});
-				}
-
 				if let Ok(intercept_scid) = result.intercept_scid.to_scid() {
 					self.pending_events.enqueue(Event::LSPS2Client(
 						LSPS2ClientEvent::InvoiceParametersReady {
@@ -336,7 +323,7 @@ where
 				Ok(())
 			}
 			None => {
-				return Err(LightningError { err: format!("Received error response for a buy request from an unknown counterparty ({:?})",counterparty_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
+				return Err(LightningError { err: format!("Received error response for a buy request from an unknown counterparty ({:?})", counterparty_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
 			}
 		}
 	}
