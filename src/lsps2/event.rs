@@ -25,6 +25,13 @@ pub enum LSPS2ClientEvent {
 	///
 	/// [`LSPS2ClientHandler::select_opening_params`]: crate::lsps2::client::LSPS2ClientHandler::select_opening_params
 	OpeningParametersReady {
+		/// The identifier of the issued LSPS2 `get_info` request, as returned by
+		/// [`LSPS2ClientHandler::request_opening_params`]
+		///
+		/// This can be used to track which request this event corresponds to.
+		///
+		/// [`LSPS2ClientHandler::request_opening_params`]: crate::lsps2::client::LSPS2ClientHandler::request_opening_params
+		request_id: RequestId,
 		/// The node id of the LSP that provided this response.
 		counterparty_node_id: PublicKey,
 		/// The menu of fee parameters the LSP is offering at this time.

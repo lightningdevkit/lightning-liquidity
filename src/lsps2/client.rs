@@ -155,8 +155,12 @@ where
 	/// `token` is an optional `String` that will be provided to the LSP.
 	/// It can be used by the LSP as an API key, coupon code, or some other way to identify a user.
 	///
+	/// Returns the used [`RequestId`], which will be returned via [`OpeningParametersReady`].
+	///
 	/// [`OpeningParametersReady`]: crate::lsps2::event::LSPS2ClientEvent::OpeningParametersReady
-	pub fn request_opening_params(&self, counterparty_node_id: PublicKey, token: Option<String>) {
+	pub fn request_opening_params(
+		&self, counterparty_node_id: PublicKey, token: Option<String>,
+	) -> RequestId {
 		let request_id = crate::utils::generate_request_id(&self.entropy_source);
 
 		{
@@ -170,9 +174,14 @@ where
 
 		self.pending_messages.enqueue(
 			&counterparty_node_id,
-			LSPS2Message::Request(request_id, LSPS2Request::GetInfo(GetInfoRequest { token }))
-				.into(),
+			LSPS2Message::Request(
+				request_id.clone(),
+				LSPS2Request::GetInfo(GetInfoRequest { token }),
+			)
+			.into(),
 		);
+
+		request_id
 	}
 
 	/// Confirms a set of chosen channel opening parameters to use for the JIT channel and
@@ -249,6 +258,7 @@ where
 
 				self.pending_events.enqueue(Event::LSPS2Client(
 					LSPS2ClientEvent::OpeningParametersReady {
+						request_id,
 						counterparty_node_id: *counterparty_node_id,
 						opening_fee_params_menu: result.opening_fee_params_menu,
 						min_payment_size_msat: result.min_payment_size_msat,
