@@ -27,7 +27,7 @@ use core::default::Default;
 use core::ops::Deref;
 
 use crate::lsps2::msgs::{
-	BuyRequest, BuyResponse, GetInfoRequest, GetInfoResponse, InterceptScid, LSPS2Message,
+	BuyRequest, BuyResponse, GetInfoRequest, GetInfoResponse, LSPS2Message,
 	LSPS2Request, LSPS2Response, OpeningFeeParams,
 };
 
@@ -49,51 +49,13 @@ impl Default for LSPS2ClientConfig {
 	}
 }
 
-struct ChannelStateError(String);
-
-impl From<ChannelStateError> for LightningError {
-	fn from(value: ChannelStateError) -> Self {
-		LightningError { err: value.0, action: ErrorAction::IgnoreAndLog(Level::Info) }
-	}
-}
-
-#[derive(PartialEq, Debug)]
-enum InboundJITChannelState {
-	BuyRequested,
-	PendingPayment { client_trusts_lsp: bool, intercept_scid: InterceptScid },
-}
-
-impl InboundJITChannelState {
-	fn invoice_params_received(
-		&self, client_trusts_lsp: bool, intercept_scid: InterceptScid,
-	) -> Result<Self, ChannelStateError> {
-		match self {
-			InboundJITChannelState::BuyRequested { .. } => {
-				Ok(InboundJITChannelState::PendingPayment { client_trusts_lsp, intercept_scid })
-			}
-			state => Err(ChannelStateError(format!(
-				"Invoice params received when JIT Channel was in state: {:?}",
-				state
-			))),
-		}
-	}
-}
-
 struct InboundJITChannel {
-	state: InboundJITChannelState,
 	payment_size_msat: Option<u64>,
 }
 
 impl InboundJITChannel {
 	fn new(payment_size_msat: Option<u64>) -> Self {
-		Self { payment_size_msat, state: InboundJITChannelState::BuyRequested }
-	}
-
-	fn invoice_params_received(
-		&mut self, client_trusts_lsp: bool, intercept_scid: InterceptScid,
-	) -> Result<(), LightningError> {
-		self.state = self.state.invoice_params_received(client_trusts_lsp, intercept_scid)?;
-		Ok(())
+		Self { payment_size_msat }
 	}
 }
 
@@ -305,7 +267,7 @@ where
 			Some(inner_state_lock) => {
 				let mut peer_state = inner_state_lock.lock().unwrap();
 
-				let mut jit_channel =
+				let jit_channel =
 					peer_state.pending_buy_requests.remove(&request_id).ok_or(LightningError {
 						err: format!(
 							"Received buy response for an unknown request: {:?}",
@@ -324,12 +286,6 @@ where
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					});
 				}
-
-				// Update the channel state
-				jit_channel.invoice_params_received(
-					result.client_trusts_lsp,
-					result.intercept_scid.clone(),
-				)?;
 
 				if let Ok(intercept_scid) = result.intercept_scid.to_scid() {
 					self.pending_events.enqueue(Event::LSPS2Client(
