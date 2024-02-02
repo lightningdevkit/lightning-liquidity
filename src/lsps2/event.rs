@@ -48,13 +48,13 @@ pub enum LSPS2ClientEvent {
 	/// When the invoice is paid, the LSP will open a channel with the previously agreed upon
 	/// parameters to you.
 	InvoiceParametersReady {
-		/// A user-specified identifier used to track the channel open.
-		///
-		/// This is the same value as previously passed to
+		/// The identifier of the issued LSPS2 `buy` request, as returned by
 		/// [`LSPS2ClientHandler::select_opening_params`].
 		///
+		/// This can be used to track which request this event corresponds to.
+		///
 		/// [`LSPS2ClientHandler::select_opening_params`]: crate::lsps2::client::LSPS2ClientHandler::select_opening_params
-		user_channel_id: u128,
+		request_id: RequestId,
 		/// The node id of the LSP.
 		counterparty_node_id: PublicKey,
 		/// The intercept short channel id to use in the route hint.
