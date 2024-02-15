@@ -212,8 +212,6 @@ where
 						request_id,
 						counterparty_node_id: *counterparty_node_id,
 						opening_fee_params_menu: result.opening_fee_params_menu,
-						min_payment_size_msat: result.min_payment_size_msat,
-						max_payment_size_msat: result.max_payment_size_msat,
 					},
 				));
 			}

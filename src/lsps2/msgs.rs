@@ -41,8 +41,12 @@ pub struct RawOpeningFeeParams {
 	pub valid_until: chrono::DateTime<Utc>,
 	/// The number of blocks after confirmation that the LSP promises it will keep the channel alive without closing.
 	pub min_lifetime: u32,
-	/// T maximum number of blocks that the client is allowed to set its `to_self_delay` parameter.
+	/// The maximum number of blocks that the client is allowed to set its `to_self_delay` parameter.
 	pub max_client_to_self_delay: u32,
+	/// The minimum payment size that the LSP will accept when opening a channel.
+	pub min_payment_size_msat: u64,
+	/// The maximum payment size that the LSP will accept when opening a channel.
+	pub max_payment_size_msat: u64,
 }
 
 impl RawOpeningFeeParams {
@@ -53,6 +57,8 @@ impl RawOpeningFeeParams {
 		hmac.input(self.valid_until.to_rfc3339().as_bytes());
 		hmac.input(&self.min_lifetime.to_be_bytes());
 		hmac.input(&self.max_client_to_self_delay.to_be_bytes());
+		hmac.input(&self.min_payment_size_msat.to_be_bytes());
+		hmac.input(&self.max_payment_size_msat.to_be_bytes());
 		let promise_bytes = Hmac::from_engine(hmac).to_byte_array();
 		let promise = utils::hex_str(&promise_bytes[..]);
 		OpeningFeeParams {
@@ -61,6 +67,8 @@ impl RawOpeningFeeParams {
 			valid_until: self.valid_until.clone(),
 			min_lifetime: self.min_lifetime,
 			max_client_to_self_delay: self.max_client_to_self_delay,
+			min_payment_size_msat: self.min_payment_size_msat,
+			max_payment_size_msat: self.max_payment_size_msat,
 			promise,
 		}
 	}
@@ -83,6 +91,10 @@ pub struct OpeningFeeParams {
 	pub min_lifetime: u32,
 	/// The maximum number of blocks that the client is allowed to set its `to_self_delay` parameter.
 	pub max_client_to_self_delay: u32,
+	/// The minimum payment size that the LSP will accept when opening a channel.
+	pub min_payment_size_msat: u64,
+	/// The maximum payment size that the LSP will accept when opening a channel.
+	pub max_payment_size_msat: u64,
 	/// The HMAC used to verify the authenticity of these parameters.
 	pub promise: String,
 }
@@ -92,10 +104,6 @@ pub struct OpeningFeeParams {
 pub struct GetInfoResponse {
 	/// A set of opening fee parameters.
 	pub opening_fee_params_menu: Vec<OpeningFeeParams>,
-	/// The minimum payment size required to open a channel.
-	pub min_payment_size_msat: u64,
-	/// The maximum payment size the lsp will tolerate.
-	pub max_payment_size_msat: u64,
 }
 
 /// A request to buy a JIT channel.
@@ -215,6 +223,8 @@ mod tests {
 			chrono::DateTime::parse_from_rfc3339("2035-05-20T08:30:45Z").unwrap().into();
 		let min_lifetime = 144;
 		let max_client_to_self_delay = 128;
+		let min_payment_size_msat = 1;
+		let max_payment_size_msat = 100_000_000;
 
 		let raw = RawOpeningFeeParams {
 			min_fee_msat,
@@ -222,6 +232,8 @@ mod tests {
 			valid_until: valid_until.clone().into(),
 			min_lifetime,
 			max_client_to_self_delay,
+			min_payment_size_msat,
+			max_payment_size_msat,
 		};
 
 		let promise_secret = [1u8; 32];
@@ -244,6 +256,8 @@ mod tests {
 		let valid_until = chrono::DateTime::parse_from_rfc3339("2035-05-20T08:30:45Z").unwrap();
 		let min_lifetime = 144;
 		let max_client_to_self_delay = 128;
+		let min_payment_size_msat = 1;
+		let max_payment_size_msat = 100_000_000;
 
 		let raw = RawOpeningFeeParams {
 			min_fee_msat,
@@ -251,6 +265,8 @@ mod tests {
 			valid_until: valid_until.into(),
 			min_lifetime,
 			max_client_to_self_delay,
+			min_payment_size_msat,
+			max_payment_size_msat,
 		};
 
 		let promise_secret = [1u8; 32];
@@ -267,6 +283,8 @@ mod tests {
 		let valid_until = chrono::DateTime::parse_from_rfc3339("2035-05-20T08:30:45Z").unwrap();
 		let min_lifetime = 144;
 		let max_client_to_self_delay = 128;
+		let min_payment_size_msat = 1;
+		let max_payment_size_msat = 100_000_000;
 
 		let raw = RawOpeningFeeParams {
 			min_fee_msat,
@@ -274,6 +292,8 @@ mod tests {
 			valid_until: valid_until.into(),
 			min_lifetime,
 			max_client_to_self_delay,
+			min_payment_size_msat,
+			max_payment_size_msat,
 		};
 
 		let promise_secret = [1u8; 32];
@@ -292,6 +312,8 @@ mod tests {
 		let valid_until = chrono::DateTime::parse_from_rfc3339("2023-05-20T08:30:45Z").unwrap();
 		let min_lifetime = 144;
 		let max_client_to_self_delay = 128;
+		let min_payment_size_msat = 1;
+		let max_payment_size_msat = 100_000_000;
 
 		let raw = RawOpeningFeeParams {
 			min_fee_msat,
@@ -299,6 +321,8 @@ mod tests {
 			valid_until: valid_until.into(),
 			min_lifetime,
 			max_client_to_self_delay,
+			min_payment_size_msat,
+			max_payment_size_msat,
 		};
 
 		let promise_secret = [1u8; 32];

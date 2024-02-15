@@ -44,10 +44,6 @@ pub struct LSPS2ServiceConfig {
 	///
 	/// Note: If this changes then old promises given out will be considered invalid.
 	pub promise_secret: [u8; 32],
-	/// The minimum payment size you are willing to accept.
-	pub min_payment_size_msat: u64,
-	/// The maximum payment size you are willing to accept.
-	pub max_payment_size_msat: u64,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -69,6 +65,8 @@ enum OutboundJITChannelState {
 	AwaitingPayment {
 		min_fee_msat: u64,
 		proportional_fee: u32,
+		min_payment_size_msat: u64,
+		max_payment_size_msat: u64,
 		htlcs: Vec<InterceptedHTLC>,
 		payment_size_msat: Option<u64>,
 	},
@@ -88,18 +86,20 @@ impl OutboundJITChannelState {
 		OutboundJITChannelState::AwaitingPayment {
 			min_fee_msat: opening_fee_params.min_fee_msat,
 			proportional_fee: opening_fee_params.proportional,
+			min_payment_size_msat: opening_fee_params.min_payment_size_msat,
+			max_payment_size_msat: opening_fee_params.max_payment_size_msat,
 			htlcs: vec![],
 			payment_size_msat,
 		}
 	}
 
-	fn htlc_intercepted(
-		&self, htlc: InterceptedHTLC, config: &LSPS2ServiceConfig,
-	) -> Result<Self, ChannelStateError> {
+	fn htlc_intercepted(&self, htlc: InterceptedHTLC) -> Result<Self, ChannelStateError> {
 		match self {
 			OutboundJITChannelState::AwaitingPayment {
 				htlcs,
 				payment_size_msat,
+				min_payment_size_msat,
+				max_payment_size_msat,
 				min_fee_msat,
 				proportional_fee,
 			} => {
@@ -122,14 +122,14 @@ impl OutboundJITChannelState {
 						(total_expected_outbound_amount_msat, false)
 					};
 
-				if expected_payment_size_msat < config.min_payment_size_msat
-					|| expected_payment_size_msat > config.max_payment_size_msat
+				if expected_payment_size_msat < *min_payment_size_msat
+					|| expected_payment_size_msat > *max_payment_size_msat
 				{
 					return Err(ChannelStateError(
 							format!("Payment size violates our limits: expected_payment_size_msat = {}, min_payment_size_msat = {}, max_payment_size_msat = {}",
 									expected_payment_size_msat,
-									config.min_payment_size_msat,
-									config.max_payment_size_msat
+									min_payment_size_msat,
+									max_payment_size_msat
 							)));
 				}
 
@@ -164,6 +164,8 @@ impl OutboundJITChannelState {
 							proportional_fee: *proportional_fee,
 							htlcs,
 							payment_size_msat: *payment_size_msat,
+							min_payment_size_msat: *min_payment_size_msat,
+							max_payment_size_msat: *max_payment_size_msat,
 						})
 					} else {
 						Err(ChannelStateError(
@@ -211,9 +213,9 @@ impl OutboundJITChannel {
 	}
 
 	fn htlc_intercepted(
-		&mut self, htlc: InterceptedHTLC, config: &LSPS2ServiceConfig,
+		&mut self, htlc: InterceptedHTLC,
 	) -> Result<Option<(u64, u64)>, LightningError> {
-		self.state = self.state.htlc_intercepted(htlc, config)?;
+		self.state = self.state.htlc_intercepted(htlc)?;
 
 		match &self.state {
 			OutboundJITChannelState::AwaitingPayment { .. } => {
@@ -370,8 +372,6 @@ where
 									param.into_opening_fee_params(&self.config.promise_secret)
 								})
 								.collect(),
-							min_payment_size_msat: self.config.min_payment_size_msat,
-							max_payment_size_msat: self.config.max_payment_size_msat,
 						});
 						self.enqueue_response(counterparty_node_id, request_id, response);
 						Ok(())
@@ -472,7 +472,7 @@ where
 						peer_state.outbound_channels_by_intercept_scid.get_mut(&intercept_scid)
 					{
 						let htlc = InterceptedHTLC { intercept_id, expected_outbound_amount_msat };
-						match jit_channel.htlc_intercepted(htlc, &self.config) {
+						match jit_channel.htlc_intercepted(htlc) {
 							Ok(Some((opening_fee_msat, amt_to_forward_msat))) => {
 								self.enqueue_event(Event::LSPS2Service(
 									LSPS2ServiceEvent::OpenChannel {
@@ -616,7 +616,7 @@ where
 		&self, request_id: RequestId, counterparty_node_id: &PublicKey, params: BuyRequest,
 	) -> Result<(), LightningError> {
 		if let Some(payment_size_msat) = params.payment_size_msat {
-			if payment_size_msat < self.config.min_payment_size_msat {
+			if payment_size_msat < params.opening_fee_params.min_payment_size_msat {
 				self.enqueue_response(
 					counterparty_node_id,
 					request_id,
@@ -633,7 +633,7 @@ where
 				});
 			}
 
-			if payment_size_msat > self.config.max_payment_size_msat {
+			if payment_size_msat > params.opening_fee_params.max_payment_size_msat {
 				self.enqueue_response(
 					counterparty_node_id,
 					request_id,
