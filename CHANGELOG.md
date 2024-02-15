@@ -1,5 +1,5 @@
 # 0.1.0-alpha - Feb. 15, 2024
-This is the first alpha release of `lighting-liquidity`. It features
+This is the first alpha release of `lightning-liquidity`. It features
 early-stage client- and service-side support for the LSPS2 just-in-time (JIT)
 channel protocol.
 
