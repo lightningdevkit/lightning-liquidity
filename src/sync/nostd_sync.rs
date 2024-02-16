@@ -2,12 +2,20 @@
 //! This file was copied from `rust-lightning`.
 pub use ::alloc::sync::Arc;
 use core::cell::{Ref, RefCell, RefMut};
+use core::fmt;
 use core::ops::{Deref, DerefMut};
 
 pub type LockResult<Guard> = Result<Guard, ()>;
 
 pub struct Mutex<T: ?Sized> {
 	inner: RefCell<T>,
+}
+
+impl<T: fmt::Debug> fmt::Debug for Mutex<T> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		let t = self.lock().unwrap();
+		fmt::Debug::fmt(t.deref(), f)
+	}
 }
 
 #[must_use = "if unused the Mutex will immediately unlock"]
