@@ -77,7 +77,7 @@ enum OutboundJITChannelState {
 	},
 	ChannelReady {
 		htlcs: Vec<InterceptedHTLC>,
-		amt_to_forward_msat: u64,
+		opening_fee_msat: u64,
 	},
 }
 
@@ -183,10 +183,10 @@ impl OutboundJITChannelState {
 
 	fn channel_ready(&self) -> Result<Self, ChannelStateError> {
 		match self {
-			OutboundJITChannelState::PendingChannelOpen { htlcs, amt_to_forward_msat, .. } => {
+			OutboundJITChannelState::PendingChannelOpen { htlcs, opening_fee_msat, .. } => {
 				Ok(OutboundJITChannelState::ChannelReady {
 					htlcs: htlcs.clone(),
-					amt_to_forward_msat: *amt_to_forward_msat,
+					opening_fee_msat: *opening_fee_msat,
 				})
 			}
 			state => Err(ChannelStateError(format!(
@@ -241,8 +241,8 @@ impl OutboundJITChannel {
 		self.state = self.state.channel_ready()?;
 
 		match &self.state {
-			OutboundJITChannelState::ChannelReady { htlcs, amt_to_forward_msat } => {
-				Ok((htlcs.clone(), *amt_to_forward_msat))
+			OutboundJITChannelState::ChannelReady { htlcs, opening_fee_msat } => {
+				Ok((htlcs.clone(), *opening_fee_msat))
 			}
 			impossible_state => Err(LightningError {
 				err: format!(
@@ -529,11 +529,9 @@ where
 						peer_state.outbound_channels_by_intercept_scid.get_mut(&intercept_scid)
 					{
 						match jit_channel.channel_ready() {
-							Ok((htlcs, total_amt_to_forward_msat)) => {
-								let amounts_to_forward_msat = calculate_amount_to_forward_per_htlc(
-									&htlcs,
-									total_amt_to_forward_msat,
-								);
+							Ok((htlcs, opening_fee_msat)) => {
+								let amounts_to_forward_msat =
+									calculate_amount_to_forward_per_htlc(&htlcs, opening_fee_msat);
 
 								for (intercept_id, amount_to_forward_msat) in
 									amounts_to_forward_msat
@@ -759,40 +757,38 @@ where
 }
 
 fn calculate_amount_to_forward_per_htlc(
-	htlcs: &[InterceptedHTLC], total_amt_to_forward_msat: u64,
+	htlcs: &[InterceptedHTLC], total_fee_msat: u64,
 ) -> Vec<(InterceptId, u64)> {
 	// TODO: we should eventually make sure the HTLCs are all above ChannelDetails::next_outbound_minimum_msat
-	let total_received_msat: u64 =
+	let total_expected_outbound_msat: u64 =
 		htlcs.iter().map(|htlc| htlc.expected_outbound_amount_msat).sum();
-
-	match total_received_msat.checked_sub(total_amt_to_forward_msat) {
-		Some(total_fee_msat) => {
-			let mut fee_remaining_msat = total_fee_msat;
-
-			let mut per_htlc_forwards = vec![];
-
-			for (index, htlc) in htlcs.iter().enumerate() {
-				let proportional_fee_amt_msat =
-					total_fee_msat * (htlc.expected_outbound_amount_msat / total_received_msat);
-
-				let mut actual_fee_amt_msat =
-					core::cmp::min(fee_remaining_msat, proportional_fee_amt_msat);
-				fee_remaining_msat -= actual_fee_amt_msat;
-
-				if index == htlcs.len() - 1 {
-					actual_fee_amt_msat += fee_remaining_msat;
-				}
-
-				let amount_to_forward_msat =
-					htlc.expected_outbound_amount_msat.saturating_sub(actual_fee_amt_msat);
-
-				per_htlc_forwards.push((htlc.intercept_id, amount_to_forward_msat))
-			}
-
-			per_htlc_forwards
-		}
-		None => Vec::new(),
+	if total_fee_msat > total_expected_outbound_msat {
+		debug_assert!(false, "Fee is larger than the total expected outbound amount.");
+		return Vec::new();
 	}
+
+	let mut fee_remaining_msat = total_fee_msat;
+	let mut per_htlc_forwards = vec![];
+	for (index, htlc) in htlcs.iter().enumerate() {
+		let proportional_fee_amt_msat = (total_fee_msat as u128
+			* htlc.expected_outbound_amount_msat as u128
+			/ total_expected_outbound_msat as u128) as u64;
+
+		let mut actual_fee_amt_msat = core::cmp::min(fee_remaining_msat, proportional_fee_amt_msat);
+		actual_fee_amt_msat =
+			core::cmp::min(actual_fee_amt_msat, htlc.expected_outbound_amount_msat);
+		fee_remaining_msat -= actual_fee_amt_msat;
+
+		if index == htlcs.len() - 1 {
+			actual_fee_amt_msat += fee_remaining_msat;
+		}
+
+		let amount_to_forward_msat =
+			htlc.expected_outbound_amount_msat.saturating_sub(actual_fee_amt_msat);
+
+		per_htlc_forwards.push((htlc.intercept_id, amount_to_forward_msat))
+	}
+	per_htlc_forwards
 }
 
 #[cfg(test)]
@@ -812,7 +808,7 @@ mod tests {
 
 	proptest! {
 		#[test]
-		fn test_calculate_amount_to_forward((o_0, o_1, o_2, total_amt_to_forward_msat) in arb_forward_amounts()) {
+		fn proptest_calculate_amount_to_forward((o_0, o_1, o_2, total_fee_msat) in arb_forward_amounts()) {
 			let htlcs = vec![
 				InterceptedHTLC {
 					intercept_id: InterceptId([0; 32]),
@@ -828,10 +824,10 @@ mod tests {
 				},
 			];
 
-			let result = calculate_amount_to_forward_per_htlc(&htlcs, total_amt_to_forward_msat);
+			let result = calculate_amount_to_forward_per_htlc(&htlcs, total_fee_msat);
 			let total_received_msat = o_0 + o_1 + o_2;
 
-			if total_received_msat < total_amt_to_forward_msat {
+			if total_received_msat < total_fee_msat {
 				assert_eq!(result.len(), 0);
 			} else {
 				assert_ne!(result.len(), 0);
@@ -843,16 +839,42 @@ mod tests {
 				assert!(result[2].1 <= o_2);
 
 				let result_sum = result.iter().map(|(_, f)| f).sum::<u64>();
-				assert!(result_sum >= total_amt_to_forward_msat);
-				let five_pct = result_sum as f32 * 0.1;
-				let fair_share_0 = ((o_0 as f32 / total_received_msat as f32) * result_sum as f32).max(o_0 as f32);
+				assert_eq!(total_received_msat - result_sum, total_fee_msat);
+				let five_pct = result_sum as f32 * 0.05;
+				let fair_share_0 = (o_0 as f32 / total_received_msat as f32) * result_sum as f32;
 				assert!(result[0].1 as f32 <= fair_share_0 + five_pct);
-				let fair_share_1 = ((o_1 as f32 / total_received_msat as f32) * result_sum as f32).max(o_1 as f32);
+				let fair_share_1 = (o_1 as f32 / total_received_msat as f32) * result_sum as f32;
 				assert!(result[1].1 as f32 <= fair_share_1 + five_pct);
-				let fair_share_2 = ((o_2 as f32 / total_received_msat as f32) * result_sum as f32).max(o_2 as f32);
+				let fair_share_2 = (o_2 as f32 / total_received_msat as f32) * result_sum as f32;
 				assert!(result[2].1 as f32 <= fair_share_2 + five_pct);
 			}
-
 		}
+	}
+
+	#[test]
+	fn test_calculate_amount_to_forward() {
+		let htlcs = vec![
+			InterceptedHTLC {
+				intercept_id: InterceptId([0; 32]),
+				expected_outbound_amount_msat: 2,
+			},
+			InterceptedHTLC {
+				intercept_id: InterceptId([1; 32]),
+				expected_outbound_amount_msat: 6,
+			},
+			InterceptedHTLC {
+				intercept_id: InterceptId([2; 32]),
+				expected_outbound_amount_msat: 2,
+			},
+		];
+		let result = calculate_amount_to_forward_per_htlc(&htlcs, 5);
+		assert_eq!(
+			result,
+			vec![
+				(htlcs[0].intercept_id, 1),
+				(htlcs[1].intercept_id, 3),
+				(htlcs[2].intercept_id, 1),
+			]
+		);
 	}
 }
