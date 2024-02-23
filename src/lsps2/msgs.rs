@@ -9,6 +9,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::lsps0::msgs::{LSPSMessage, RequestId, ResponseError};
+use crate::lsps0::ser::{string_amount, string_amount_option};
 use crate::prelude::{String, Vec};
 use crate::utils;
 
@@ -82,6 +83,7 @@ impl RawOpeningFeeParams {
 /// the promise using the secret. Once verified they can be confident it was not modified by the client.
 pub struct OpeningFeeParams {
 	/// The minimum fee required for the channel open.
+	#[serde(with = "string_amount")]
 	pub min_fee_msat: u64,
 	/// A fee proportional to the size of the initial payment.
 	pub proportional: u32,
@@ -92,8 +94,10 @@ pub struct OpeningFeeParams {
 	/// The maximum number of blocks that the client is allowed to set its `to_self_delay` parameter.
 	pub max_client_to_self_delay: u32,
 	/// The minimum payment size that the LSP will accept when opening a channel.
+	#[serde(with = "string_amount")]
 	pub min_payment_size_msat: u64,
 	/// The maximum payment size that the LSP will accept when opening a channel.
+	#[serde(with = "string_amount")]
 	pub max_payment_size_msat: u64,
 	/// The HMAC used to verify the authenticity of these parameters.
 	pub promise: String,
@@ -112,7 +116,9 @@ pub struct BuyRequest {
 	/// The fee parameters you would like to use.
 	pub opening_fee_params: OpeningFeeParams,
 	/// The size of the initial payment you expect to receive.
+	#[serde(default)]
 	#[serde(skip_serializing_if = "Option::is_none")]
+	#[serde(with = "string_amount_option")]
 	pub payment_size_msat: Option<u64>,
 }
 
@@ -213,6 +219,7 @@ impl From<LSPS2Message> for LSPSMessage {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::alloc::string::ToString;
 	use crate::lsps2::utils::is_valid_opening_fee_params;
 
 	#[test]
@@ -329,5 +336,52 @@ mod tests {
 
 		let opening_fee_params = raw.into_opening_fee_params(&promise_secret);
 		assert!(!is_valid_opening_fee_params(&opening_fee_params, &promise_secret));
+	}
+
+	#[test]
+	fn buy_request_serialization() {
+		let min_fee_msat = 100;
+		let proportional = 21;
+		let valid_until = chrono::DateTime::parse_from_rfc3339("2023-05-20T08:30:45Z").unwrap();
+		let min_lifetime = 144;
+		let max_client_to_self_delay = 128;
+		let min_payment_size_msat = 1;
+		let max_payment_size_msat = 100_000_000;
+
+		let raw = RawOpeningFeeParams {
+			min_fee_msat,
+			proportional,
+			valid_until: valid_until.into(),
+			min_lifetime,
+			max_client_to_self_delay,
+			min_payment_size_msat,
+			max_payment_size_msat,
+		};
+
+		let promise_secret = [1u8; 32];
+
+		let opening_fee_params = raw.into_opening_fee_params(&promise_secret);
+		let json_str = r#"{"max_client_to_self_delay":128,"max_payment_size_msat":"100000000","min_fee_msat":"100","min_lifetime":144,"min_payment_size_msat":"1","promise":"1134a5c51e3ba2e8f4259610d5e12c1bf4c50ddcd3f8af563e0a00d1fff41dea","proportional":21,"valid_until":"2023-05-20T08:30:45Z"}"#;
+		assert_eq!(json_str, serde_json::json!(opening_fee_params).to_string());
+		assert_eq!(opening_fee_params, serde_json::from_str(json_str).unwrap());
+
+		let payment_size_msat = Some(1234);
+		let buy_request_fixed =
+			BuyRequest { opening_fee_params: opening_fee_params.clone(), payment_size_msat };
+		let json_str = r#"{"opening_fee_params":{"max_client_to_self_delay":128,"max_payment_size_msat":"100000000","min_fee_msat":"100","min_lifetime":144,"min_payment_size_msat":"1","promise":"1134a5c51e3ba2e8f4259610d5e12c1bf4c50ddcd3f8af563e0a00d1fff41dea","proportional":21,"valid_until":"2023-05-20T08:30:45Z"},"payment_size_msat":"1234"}"#;
+		assert_eq!(json_str, serde_json::json!(buy_request_fixed).to_string());
+		assert_eq!(buy_request_fixed, serde_json::from_str(json_str).unwrap());
+
+		let payment_size_msat = None;
+		let buy_request_variable = BuyRequest { opening_fee_params, payment_size_msat };
+
+		// Check we skip serialization if payment_size_msat is None.
+		let json_str = r#"{"opening_fee_params":{"max_client_to_self_delay":128,"max_payment_size_msat":"100000000","min_fee_msat":"100","min_lifetime":144,"min_payment_size_msat":"1","promise":"1134a5c51e3ba2e8f4259610d5e12c1bf4c50ddcd3f8af563e0a00d1fff41dea","proportional":21,"valid_until":"2023-05-20T08:30:45Z"}}"#;
+		assert_eq!(json_str, serde_json::json!(buy_request_variable).to_string());
+		assert_eq!(buy_request_variable, serde_json::from_str(json_str).unwrap());
+
+		// Check we still deserialize correctly if payment_size_msat is 'null'.
+		let json_str = r#"{"opening_fee_params":{"max_client_to_self_delay":128,"max_payment_size_msat":"100000000","min_fee_msat":"100","min_lifetime":144,"min_payment_size_msat":"1","promise":"1134a5c51e3ba2e8f4259610d5e12c1bf4c50ddcd3f8af563e0a00d1fff41dea","proportional":21,"valid_until":"2023-05-20T08:30:45Z"},"payment_size_msat":null}"#;
+		assert_eq!(buy_request_variable, serde_json::from_str(json_str).unwrap());
 	}
 }
