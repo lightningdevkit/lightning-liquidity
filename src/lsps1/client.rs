@@ -62,7 +62,7 @@ impl InboundRequestState {
 		match self {
 			InboundRequestState::InfoRequested => {
 				Ok(InboundRequestState::OptionsSupport { options_supported: options })
-			}
+			},
 			state => Err(ChannelStateError(format!(
 				"Received unexpected get_info response. Channel was in state: {:?}",
 				state
@@ -81,7 +81,7 @@ impl InboundRequestState {
 						options_supported, order
 					)));
 				}
-			}
+			},
 			state => Err(ChannelStateError(format!(
 				"Received create order request for wrong channel. Channel was in state: {:?}",
 				state
@@ -102,7 +102,7 @@ impl InboundRequestState {
 						order, response_order
 					)))
 				}
-			}
+			},
 			state => Err(ChannelStateError(format!(
 				"Received unexpected create order response. Channel was in state: {:?}",
 				state
@@ -117,7 +117,7 @@ impl InboundRequestState {
 					user_channel_id,
 					order_id: order_id.clone(),
 				})
-			}
+			},
 			state => Err(ChannelStateError(format!(
 				"Received unexpected response. Channel was in state: {:?}",
 				state
@@ -158,7 +158,7 @@ impl InboundCRChannel {
 					action: ErrorAction::IgnoreAndLog(Level::Error),
 					err: "impossible state transition".to_string(),
 				});
-			}
+			},
 		}
 	}
 
@@ -293,7 +293,7 @@ where
 					Err(e) => {
 						peer_state_lock.remove_inbound_channel(user_channel_id);
 						return Err(e);
-					}
+					},
 				};
 
 				self.pending_events.enqueue(Event::LSPS1Client(LSPS1ClientEvent::GetInfoResponse {
@@ -302,7 +302,7 @@ where
 					website: result.website,
 					options_supported: result.options,
 				}))
-			}
+			},
 			None => {
 				return Err(LightningError {
 					err: format!(
@@ -311,7 +311,7 @@ where
 					),
 					action: ErrorAction::IgnoreAndLog(Level::Info),
 				})
-			}
+			},
 		}
 		Ok(())
 	}
@@ -344,10 +344,10 @@ where
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					})?;
 				Ok(())
-			}
+			},
 			None => {
 				return Err(LightningError { err: format!("Received error response for a create order request from an unknown counterparty ({:?})",counterparty_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
-			}
+			},
 		}
 	}
 
@@ -378,7 +378,7 @@ where
 					Err(e) => {
 						peer_state_lock.remove_inbound_channel(user_channel_id);
 						return Err(APIError::APIMisuseError { err: e.err });
-					}
+					},
 				};
 
 				let request_id = crate::utils::generate_request_id(&self.entropy_source);
@@ -392,12 +392,12 @@ where
 					)
 					.into(),
 				);
-			}
+			},
 			None => {
 				return Err(APIError::APIMisuseError {
 					err: format!("No existing state with counterparty {}", counterparty_node_id),
 				})
-			}
+			},
 		}
 		Ok(())
 	}
@@ -460,7 +460,7 @@ where
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					});
 				}
-			}
+			},
 			None => {
 				return Err(LightningError {
 					err: format!(
@@ -469,7 +469,7 @@ where
 					),
 					action: ErrorAction::IgnoreAndLog(Level::Info),
 				})
-			}
+			},
 		}
 
 		Ok(())
@@ -503,10 +503,10 @@ where
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					})?;
 				Ok(())
-			}
+			},
 			None => {
 				return Err(LightningError { err: format!("Received error response for a create order request from an unknown counterparty ({:?})",counterparty_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
-			}
+			},
 		}
 	}
 
@@ -547,12 +547,12 @@ where
 						err: format!("Channel with user_channel_id {} not found", user_channel_id),
 					});
 				}
-			}
+			},
 			None => {
 				return Err(APIError::APIMisuseError {
 					err: format!("No existing state with counterparty {}", counterparty_node_id),
 				})
-			}
+			},
 		}
 
 		Ok(())
@@ -585,7 +585,7 @@ where
 						),
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					})?;
-			}
+			},
 			None => {
 				return Err(LightningError {
 					err: format!(
@@ -594,7 +594,7 @@ where
 					),
 					action: ErrorAction::IgnoreAndLog(Level::Info),
 				})
-			}
+			},
 		}
 
 		Ok(())
@@ -628,10 +628,10 @@ where
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					})?;
 				Ok(())
-			}
+			},
 			None => {
 				return Err(LightningError { err: format!("Received get_order response for a create order request from an unknown counterparty ({:?})",counterparty_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
-			}
+			},
 		}
 	}
 }
@@ -653,22 +653,22 @@ where
 			LSPS1Message::Response(request_id, response) => match response {
 				LSPS1Response::GetInfo(params) => {
 					self.handle_get_info_response(request_id, counterparty_node_id, params)
-				}
+				},
 				LSPS1Response::GetInfoError(error) => {
 					self.handle_get_info_error(request_id, counterparty_node_id, error)
-				}
+				},
 				LSPS1Response::CreateOrder(params) => {
 					self.handle_create_order_response(request_id, counterparty_node_id, params)
-				}
+				},
 				LSPS1Response::CreateOrderError(error) => {
 					self.handle_create_order_error(request_id, counterparty_node_id, error)
-				}
+				},
 				LSPS1Response::GetOrder(params) => {
 					self.handle_get_order_response(request_id, counterparty_node_id, params)
-				}
+				},
 				LSPS1Response::GetOrderError(error) => {
 					self.handle_get_order_error(request_id, counterparty_node_id, error)
-				}
+				},
 			},
 			_ => {
 				debug_assert!(
@@ -676,7 +676,7 @@ where
 					"Client handler received LSPS1 request message. This should never happen."
 				);
 				Err(LightningError { err: format!("Client handler received LSPS1 request message from node {:?}. This should never happen.", counterparty_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)})
-			}
+			},
 		}
 	}
 }

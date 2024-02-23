@@ -49,7 +49,7 @@ impl LSPS0ServiceHandler {
 				);
 				self.pending_messages.enqueue(counterparty_node_id, msg.into());
 				Ok(())
-			}
+			},
 		}
 	}
 }
@@ -64,14 +64,14 @@ impl ProtocolMessageHandler for LSPS0ServiceHandler {
 		match message {
 			LSPS0Message::Request(request_id, request) => {
 				self.handle_request(request_id, request, counterparty_node_id)
-			}
+			},
 			LSPS0Message::Response(..) => {
 				debug_assert!(
 					false,
 					"Service handler received LSPS0 response message. This should never happen."
 				);
 				Err(LightningError { err: format!("Service handler received LSPS0 response message from node {:?}. This should never happen.", counterparty_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)})
-			}
+			},
 		}
 	}
 }

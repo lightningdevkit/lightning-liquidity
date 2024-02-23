@@ -172,7 +172,7 @@ impl OutboundJITChannelState {
 						))
 					}
 				}
-			}
+			},
 			state => Err(ChannelStateError(format!(
 				"Intercepted HTLC when JIT Channel was in state: {:?}",
 				state
@@ -187,7 +187,7 @@ impl OutboundJITChannelState {
 					htlcs: htlcs.clone(),
 					opening_fee_msat: *opening_fee_msat,
 				})
-			}
+			},
 			state => Err(ChannelStateError(format!(
 				"Channel ready received when JIT Channel was in state: {:?}",
 				state
@@ -220,7 +220,7 @@ impl OutboundJITChannel {
 			OutboundJITChannelState::AwaitingPayment { .. } => {
 				// TODO: log that we received an htlc but are still awaiting payment
 				Ok(None)
-			}
+			},
 			OutboundJITChannelState::PendingChannelOpen {
 				opening_fee_msat,
 				amt_to_forward_msat,
@@ -242,7 +242,7 @@ impl OutboundJITChannel {
 		match &self.state {
 			OutboundJITChannelState::ChannelReady { htlcs, opening_fee_msat } => {
 				Ok((htlcs.clone(), *opening_fee_msat))
-			}
+			},
 			impossible_state => Err(LightningError {
 				err: format!(
 					"Impossible state transition during channel_ready to {:?}",
@@ -332,7 +332,7 @@ where
 						});
 						self.enqueue_response(counterparty_node_id, request_id, response);
 						Ok(())
-					}
+					},
 					_ => Err(APIError::APIMisuseError {
 						err: format!(
 							"No pending get_info request for request_id: {:?}",
@@ -340,7 +340,7 @@ where
 						),
 					}),
 				}
-			}
+			},
 			None => Err(APIError::APIMisuseError {
 				err: format!("No state for the counterparty exists: {:?}", counterparty_node_id),
 			}),
@@ -374,7 +374,7 @@ where
 						});
 						self.enqueue_response(counterparty_node_id, request_id, response);
 						Ok(())
-					}
+					},
 					_ => Err(APIError::APIMisuseError {
 						err: format!(
 							"No pending get_info request for request_id: {:?}",
@@ -382,7 +382,7 @@ where
 						),
 					}),
 				}
-			}
+			},
 			None => Err(APIError::APIMisuseError {
 				err: format!("No state for the counterparty exists: {:?}", counterparty_node_id),
 			}),
@@ -434,12 +434,12 @@ where
 						);
 
 						Ok(())
-					}
+					},
 					_ => Err(APIError::APIMisuseError {
 						err: format!("No pending buy request for request_id: {:?}", request_id),
 					}),
 				}
-			}
+			},
 			None => Err(APIError::APIMisuseError {
 				err: format!("No state for the counterparty exists: {:?}", counterparty_node_id),
 			}),
@@ -482,8 +482,8 @@ where
 										intercept_scid,
 									},
 								));
-							}
-							Ok(None) => {}
+							},
+							Ok(None) => {},
 							Err(e) => {
 								self.channel_manager
 									.get_cm()
@@ -493,15 +493,15 @@ where
 									.remove(&intercept_scid);
 								// TODO: cleanup peer_by_intercept_scid
 								return Err(APIError::APIMisuseError { err: e.err });
-							}
+							},
 						}
 					}
-				}
+				},
 				None => {
 					return Err(APIError::APIMisuseError {
 						err: format!("No counterparty found for scid: {}", intercept_scid),
 					});
-				}
+				},
 			}
 		}
 
@@ -542,7 +542,7 @@ where
 										amount_to_forward_msat,
 									)?;
 								}
-							}
+							},
 							Err(e) => {
 								return Err(APIError::APIMisuseError {
 									err: format!(
@@ -550,7 +550,7 @@ where
 										e.err
 									),
 								})
-							}
+							},
 						}
 					} else {
 						return Err(APIError::APIMisuseError {
@@ -568,12 +568,12 @@ where
 						),
 					});
 				}
-			}
+			},
 			None => {
 				return Err(APIError::APIMisuseError {
 					err: format!("No counterparty state for: {}", counterparty_node_id),
 				});
-			}
+			},
 		}
 
 		Ok(())
@@ -669,7 +669,7 @@ where
 							action: ErrorAction::IgnoreAndLog(Level::Info),
 						});
 					}
-				}
+				},
 				None => {
 					self.enqueue_response(
 						counterparty_node_id,
@@ -684,7 +684,7 @@ where
 						err: "overflow error when calculating opening_fee".to_string(),
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					});
-				}
+				},
 			}
 		}
 
@@ -739,10 +739,10 @@ where
 			LSPS2Message::Request(request_id, request) => match request {
 				LSPS2Request::GetInfo(params) => {
 					self.handle_get_info_request(request_id, counterparty_node_id, params)
-				}
+				},
 				LSPS2Request::Buy(params) => {
 					self.handle_buy_request(request_id, counterparty_node_id, params)
-				}
+				},
 			},
 			_ => {
 				debug_assert!(
@@ -750,7 +750,7 @@ where
 					"Service handler received LSPS2 response message. This should never happen."
 				);
 				Err(LightningError { err: format!("Service handler received LSPS2 response message from node {:?}. This should never happen.", counterparty_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)})
-			}
+			},
 		}
 	}
 }

@@ -222,14 +222,14 @@ impl LSPSMessage {
 		match self {
 			LSPSMessage::LSPS0(LSPS0Message::Request(request_id, request)) => {
 				Some((RequestId(request_id.0.clone()), request.into()))
-			}
+			},
 			#[cfg(lsps1)]
 			LSPSMessage::LSPS1(LSPS1Message::Request(request_id, request)) => {
 				Some((RequestId(request_id.0.clone()), request.into()))
-			}
+			},
 			LSPSMessage::LSPS2(LSPS2Message::Request(request_id, request)) => {
 				Some((RequestId(request_id.0.clone()), request.into()))
-			}
+			},
 			_ => None,
 		}
 	}
@@ -254,21 +254,21 @@ impl Serialize for LSPSMessage {
 				match request {
 					LSPS0Request::ListProtocols(params) => {
 						jsonrpc_object.serialize_field(JSONRPC_PARAMS_FIELD_KEY, params)?
-					}
+					},
 				};
-			}
+			},
 			LSPSMessage::LSPS0(LSPS0Message::Response(request_id, response)) => {
 				jsonrpc_object.serialize_field(JSONRPC_ID_FIELD_KEY, &request_id.0)?;
 
 				match response {
 					LSPS0Response::ListProtocols(result) => {
 						jsonrpc_object.serialize_field(JSONRPC_RESULT_FIELD_KEY, result)?;
-					}
+					},
 					LSPS0Response::ListProtocolsError(error) => {
 						jsonrpc_object.serialize_field(JSONRPC_ERROR_FIELD_KEY, error)?;
-					}
+					},
 				}
-			}
+			},
 			#[cfg(lsps1)]
 			LSPSMessage::LSPS1(LSPS1Message::Request(request_id, request)) => {
 				jsonrpc_object.serialize_field(JSONRPC_ID_FIELD_KEY, &request_id.0)?;
@@ -278,15 +278,15 @@ impl Serialize for LSPSMessage {
 				match request {
 					LSPS1Request::GetInfo(params) => {
 						jsonrpc_object.serialize_field(JSONRPC_PARAMS_FIELD_KEY, params)?
-					}
+					},
 					LSPS1Request::CreateOrder(params) => {
 						jsonrpc_object.serialize_field(JSONRPC_PARAMS_FIELD_KEY, params)?
-					}
+					},
 					LSPS1Request::GetOrder(params) => {
 						jsonrpc_object.serialize_field(JSONRPC_PARAMS_FIELD_KEY, params)?
-					}
+					},
 				}
-			}
+			},
 			#[cfg(lsps1)]
 			LSPSMessage::LSPS1(LSPS1Message::Response(request_id, response)) => {
 				jsonrpc_object.serialize_field(JSONRPC_ID_FIELD_KEY, &request_id.0)?;
@@ -294,24 +294,24 @@ impl Serialize for LSPSMessage {
 				match response {
 					LSPS1Response::GetInfo(result) => {
 						jsonrpc_object.serialize_field(JSONRPC_RESULT_FIELD_KEY, result)?
-					}
+					},
 					LSPS1Response::GetInfoError(error) => {
 						jsonrpc_object.serialize_field(JSONRPC_ERROR_FIELD_KEY, error)?
-					}
+					},
 					LSPS1Response::CreateOrder(result) => {
 						jsonrpc_object.serialize_field(JSONRPC_RESULT_FIELD_KEY, result)?
-					}
+					},
 					LSPS1Response::CreateOrderError(error) => {
 						jsonrpc_object.serialize_field(JSONRPC_ERROR_FIELD_KEY, error)?
-					}
+					},
 					LSPS1Response::GetOrder(result) => {
 						jsonrpc_object.serialize_field(JSONRPC_RESULT_FIELD_KEY, result)?
-					}
+					},
 					LSPS1Response::GetOrderError(error) => {
 						jsonrpc_object.serialize_field(JSONRPC_ERROR_FIELD_KEY, error)?
-					}
+					},
 				}
-			}
+			},
 			LSPSMessage::LSPS2(LSPS2Message::Request(request_id, request)) => {
 				jsonrpc_object.serialize_field(JSONRPC_ID_FIELD_KEY, &request_id.0)?;
 				jsonrpc_object
@@ -320,34 +320,34 @@ impl Serialize for LSPSMessage {
 				match request {
 					LSPS2Request::GetInfo(params) => {
 						jsonrpc_object.serialize_field(JSONRPC_PARAMS_FIELD_KEY, params)?
-					}
+					},
 					LSPS2Request::Buy(params) => {
 						jsonrpc_object.serialize_field(JSONRPC_PARAMS_FIELD_KEY, params)?
-					}
+					},
 				}
-			}
+			},
 			LSPSMessage::LSPS2(LSPS2Message::Response(request_id, response)) => {
 				jsonrpc_object.serialize_field(JSONRPC_ID_FIELD_KEY, &request_id.0)?;
 
 				match response {
 					LSPS2Response::GetInfo(result) => {
 						jsonrpc_object.serialize_field(JSONRPC_RESULT_FIELD_KEY, result)?
-					}
+					},
 					LSPS2Response::GetInfoError(error) => {
 						jsonrpc_object.serialize_field(JSONRPC_ERROR_FIELD_KEY, error)?
-					}
+					},
 					LSPS2Response::Buy(result) => {
 						jsonrpc_object.serialize_field(JSONRPC_RESULT_FIELD_KEY, result)?
-					}
+					},
 					LSPS2Response::BuyError(error) => {
 						jsonrpc_object.serialize_field(JSONRPC_ERROR_FIELD_KEY, error)?
-					}
+					},
 				}
-			}
+			},
 			LSPSMessage::Invalid(error) => {
 				jsonrpc_object.serialize_field(JSONRPC_ID_FIELD_KEY, &serde_json::Value::Null)?;
 				jsonrpc_object.serialize_field(JSONRPC_ERROR_FIELD_KEY, &error)?;
-			}
+			},
 		}
 
 		jsonrpc_object.end()
@@ -379,22 +379,22 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 			match key {
 				"id" => {
 					id = map.next_value()?;
-				}
+				},
 				"method" => {
 					method = Some(map.next_value()?);
-				}
+				},
 				"params" => {
 					params = Some(map.next_value()?);
-				}
+				},
 				"result" => {
 					result = Some(map.next_value()?);
-				}
+				},
 				"error" => {
 					error = Some(map.next_value()?);
-				}
+				},
 				_ => {
 					let _: serde_json::Value = map.next_value()?;
-				}
+				},
 			}
 		}
 
@@ -415,7 +415,7 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 
 					return Err(de::Error::custom("Received unknown error message"));
 				}
-			}
+			},
 		};
 
 		match method {
@@ -432,7 +432,7 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 						id,
 						LSPS1Request::GetInfo(request),
 					)))
-				}
+				},
 				#[cfg(lsps1)]
 				LSPSMethod::LSPS1CreateOrder => {
 					let request = serde_json::from_value(params.unwrap_or(json!({})))
@@ -441,7 +441,7 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 						id,
 						LSPS1Request::CreateOrder(request),
 					)))
-				}
+				},
 				#[cfg(lsps1)]
 				LSPSMethod::LSPS1GetOrder => {
 					let request = serde_json::from_value(params.unwrap_or(json!({})))
@@ -450,7 +450,7 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 						id,
 						LSPS1Request::GetOrder(request),
 					)))
-				}
+				},
 				LSPSMethod::LSPS2GetInfo => {
 					let request = serde_json::from_value(params.unwrap_or(json!({})))
 						.map_err(de::Error::custom)?;
@@ -458,12 +458,12 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 						id,
 						LSPS2Request::GetInfo(request),
 					)))
-				}
+				},
 				LSPSMethod::LSPS2Buy => {
 					let request = serde_json::from_value(params.unwrap_or(json!({})))
 						.map_err(de::Error::custom)?;
 					Ok(LSPSMessage::LSPS2(LSPS2Message::Request(id, LSPS2Request::Buy(request))))
-				}
+				},
 			},
 			None => match self.request_id_to_method_map.remove(&id) {
 				Some(method) => match method {
@@ -483,7 +483,7 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 						} else {
 							Err(de::Error::custom("Received invalid JSON-RPC object: one of method, result, or error required"))
 						}
-					}
+					},
 					#[cfg(lsps1)]
 					LSPSMethod::LSPS1GetInfo => {
 						if let Some(error) = error {
@@ -501,7 +501,7 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 						} else {
 							Err(de::Error::custom("Received invalid JSON-RPC object: one of method, result, or error required"))
 						}
-					}
+					},
 					#[cfg(lsps1)]
 					LSPSMethod::LSPS1CreateOrder => {
 						if let Some(error) = error {
@@ -519,7 +519,7 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 						} else {
 							Err(de::Error::custom("Received invalid JSON-RPC object: one of method, result, or error required"))
 						}
-					}
+					},
 					#[cfg(lsps1)]
 					LSPSMethod::LSPS1GetOrder => {
 						if let Some(error) = error {
@@ -537,7 +537,7 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 						} else {
 							Err(de::Error::custom("Received invalid JSON-RPC object: one of method, result, or error required"))
 						}
-					}
+					},
 					LSPSMethod::LSPS2GetInfo => {
 						if let Some(error) = error {
 							Ok(LSPSMessage::LSPS2(LSPS2Message::Response(
@@ -554,7 +554,7 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 						} else {
 							Err(de::Error::custom("Received invalid JSON-RPC object: one of method, result, or error required"))
 						}
-					}
+					},
 					LSPSMethod::LSPS2Buy => {
 						if let Some(error) = error {
 							Ok(LSPSMessage::LSPS2(LSPS2Message::Response(
@@ -571,7 +571,7 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 						} else {
 							Err(de::Error::custom("Received invalid JSON-RPC object: one of method, result, or error required"))
 						}
-					}
+					},
 				},
 				None => Err(de::Error::custom(format!(
 					"Received response for unknown request id: {}",
