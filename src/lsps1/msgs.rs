@@ -5,6 +5,8 @@ use crate::prelude::{String, Vec};
 
 use bitcoin::address::{Address, NetworkUnchecked};
 
+use lightning_invoice::Bolt11Invoice;
+
 use serde::{Deserialize, Serialize};
 
 use chrono::Utc;
@@ -141,7 +143,7 @@ pub struct OrderPayment {
 	/// What the client needs to pay in total to open the requested channel.
 	pub order_total_sat: u64,
 	/// A BOLT11 invoice the client can pay to have to channel opened.
-	pub bolt11_invoice: String,
+	pub bolt11_invoice: Bolt11Invoice,
 	/// An on-chain address the client can send [`Self::order_total_sat`] to to have the channel
 	/// opened.
 	pub onchain_address: Address<NetworkUnchecked>,
