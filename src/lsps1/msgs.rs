@@ -1,6 +1,8 @@
 //! Message, request, and other primitive types used to implement LSPS1.
 
 use crate::lsps0::msgs::{LSPSMessage, RequestId, ResponseError};
+use crate::lsps0::ser::{string_amount, string_amount_option};
+
 use crate::prelude::{String, Vec};
 
 use serde::{Deserialize, Serialize};
@@ -41,20 +43,27 @@ pub struct OptionsSupported {
 	pub supports_zero_channel_reserve: bool,
 	/// Indicates the minimum amount of satoshi that is required for the LSP to accept a payment
 	/// on-chain.
-	pub min_onchain_payment_size_sat: Option<u32>,
+	#[serde(with = "string_amount_option")]
+	pub min_onchain_payment_size_sat: Option<u64>,
 	/// The maximum number of blocks a channel can be leased for.
 	pub max_channel_expiry_blocks: u32,
 	/// The minimum number of satoshi that the client MUST request.
+	#[serde(with = "string_amount")]
 	pub min_initial_client_balance_sat: u64,
 	/// The maximum number of satoshi that the client MUST request.
+	#[serde(with = "string_amount")]
 	pub max_initial_client_balance_sat: u64,
 	/// The minimum number of satoshi that the LSP will provide to the channel.
+	#[serde(with = "string_amount")]
 	pub min_initial_lsp_balance_sat: u64,
 	/// The maximum number of satoshi that the LSP will provide to the channel.
+	#[serde(with = "string_amount")]
 	pub max_initial_lsp_balance_sat: u64,
 	/// The minimal channel size.
+	#[serde(with = "string_amount")]
 	pub min_channel_balance_sat: u64,
 	/// The maximal channel size.
+	#[serde(with = "string_amount")]
 	pub max_channel_balance_sat: u64,
 }
 
@@ -81,11 +90,13 @@ pub struct CreateOrderRequest {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct OrderParams {
 	/// Indicates how many satoshi the LSP will provide on their side.
+	#[serde(with = "string_amount")]
 	pub lsp_balance_sat: u64,
 	/// Indicates how many satoshi the client will provide on their side.
 	///
 	/// The client sends these funds to the LSP, who will push them back to the client upon opening
 	/// the channel.
+	#[serde(with = "string_amount")]
 	pub client_balance_sat: u64,
 	/// The number of blocks the client wants to wait maximally for the channel to be confirmed.
 	pub confirms_within_blocks: u32,
@@ -135,8 +146,10 @@ pub struct OrderPayment {
 	/// Indicates the current state of the payment.
 	pub state: PaymentState,
 	/// The total fee the LSP will charge to open this channel in satoshi.
+	#[serde(with = "string_amount")]
 	pub fee_total_sat: u64,
 	/// What the client needs to pay in total to open the requested channel.
+	#[serde(with = "string_amount")]
 	pub order_total_sat: u64,
 	/// A BOLT11 invoice the client can pay to have to channel opened.
 	pub bolt11_invoice: String,
@@ -172,6 +185,7 @@ pub struct OnchainPayment {
 	/// The outpoint of the payment.
 	pub outpoint: String,
 	/// The amount of satoshi paid.
+	#[serde(with = "string_amount")]
 	pub sat: u64,
 	/// Indicates if the LSP regards the transaction as sufficiently confirmed.
 	pub confirmed: bool,
@@ -285,5 +299,44 @@ impl TryFrom<LSPSMessage> for LSPS1Message {
 impl From<LSPS1Message> for LSPSMessage {
 	fn from(message: LSPS1Message) -> Self {
 		LSPSMessage::LSPS1(message)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::alloc::string::ToString;
+
+	#[test]
+	fn options_supported_serialization() {
+		let min_channel_confirmations = 6;
+		let min_onchain_payment_confirmations = Some(6);
+		let supports_zero_channel_reserve = true;
+		let min_onchain_payment_size_sat = Some(100_000);
+		let max_channel_expiry_blocks = 144;
+		let min_initial_client_balance_sat = 10_000_000;
+		let max_initial_client_balance_sat = 100_000_000;
+		let min_initial_lsp_balance_sat = 100_000;
+		let max_initial_lsp_balance_sat = 100_000_000;
+		let min_channel_balance_sat = 100_000;
+		let max_channel_balance_sat = 100_000_000;
+
+		let options_supported = OptionsSupported {
+			min_channel_confirmations,
+			min_onchain_payment_confirmations,
+			supports_zero_channel_reserve,
+			min_onchain_payment_size_sat,
+			max_channel_expiry_blocks,
+			min_initial_client_balance_sat,
+			max_initial_client_balance_sat,
+			min_initial_lsp_balance_sat,
+			max_initial_lsp_balance_sat,
+			min_channel_balance_sat,
+			max_channel_balance_sat,
+		};
+
+		let json_str = r#"{"max_channel_balance_sat":"100000000","max_channel_expiry_blocks":144,"max_initial_client_balance_sat":"100000000","max_initial_lsp_balance_sat":"100000000","min_channel_balance_sat":"100000","min_channel_confirmations":6,"min_initial_client_balance_sat":"10000000","min_initial_lsp_balance_sat":"100000","min_onchain_payment_confirmations":6,"min_onchain_payment_size_sat":"100000","supports_zero_channel_reserve":true}"#;
+		assert_eq!(json_str, serde_json::json!(options_supported).to_string());
+		assert_eq!(options_supported, serde_json::from_str(json_str).unwrap());
 	}
 }
