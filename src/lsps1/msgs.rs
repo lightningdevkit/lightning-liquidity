@@ -180,31 +180,12 @@ pub struct OnchainPayment {
 /// Details regarding the state of an ordered channel.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ChannelInfo {
-	/// The current state of the channel.
-	pub state: ChannelState,
 	/// The datetime when the funding transaction has been published.
 	pub funded_at: String,
 	/// The outpoint of the funding transaction.
 	pub funding_outpoint: String,
-	/// The channel's short channel id.
-	pub scid: Option<String>,
 	/// The earliest datetime when the channel may be closed by the LSP.
 	pub expires_at: String,
-	/// The transaction id of the channel.
-	pub closing_transaction: Option<String>,
-	/// The datetime when the closing transaction was published.
-	pub closed_at: Option<String>,
-}
-
-/// The current state of an ordered channel.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub enum ChannelState {
-	/// The funding transaction has been published.
-	Opening,
-	/// The channel has been opened.
-	Opened,
-	/// The channel has been closed.
-	Closed,
 }
 
 /// A request made to an LSP to retrieve information about an previously made order.
