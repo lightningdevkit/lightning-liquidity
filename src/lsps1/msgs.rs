@@ -3,6 +3,8 @@
 use crate::lsps0::msgs::{LSPSMessage, RequestId, ResponseError};
 use crate::prelude::{String, Vec};
 
+use bitcoin::address::{Address, NetworkUnchecked};
+
 use serde::{Deserialize, Serialize};
 
 use chrono::Utc;
@@ -94,7 +96,7 @@ pub struct OrderParams {
 	/// May contain arbitrary associated data like a coupon code or a authentication token.
 	pub token: String,
 	/// The address where the LSP will send the funds if the order fails.
-	pub refund_onchain_address: Option<String>,
+	pub refund_onchain_address: Option<Address<NetworkUnchecked>>,
 	/// Indicates if the channel should be announced to the network.
 	pub announce_channel: bool,
 }
@@ -142,7 +144,7 @@ pub struct OrderPayment {
 	pub bolt11_invoice: String,
 	/// An on-chain address the client can send [`Self::order_total_sat`] to to have the channel
 	/// opened.
-	pub onchain_address: String,
+	pub onchain_address: Address<NetworkUnchecked>,
 	/// The minimum number of block confirmations that are required for the on-chain payment to be
 	/// considered confirmed.
 	pub min_onchain_payment_confirmations: Option<u8>,
