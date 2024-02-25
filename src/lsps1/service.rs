@@ -12,8 +12,8 @@
 use super::event::LSPS1ServiceEvent;
 use super::msgs::{
 	ChannelInfo, CreateOrderRequest, CreateOrderResponse, GetInfoResponse, GetOrderRequest,
-	GetOrderResponse, LSPS1Message, LSPS1Request, LSPS1Response, OptionsSupported, OrderId,
-	OrderParams, OrderPayment, OrderState, LSPS1_CREATE_ORDER_REQUEST_ORDER_MISMATCH_ERROR_CODE,
+	LSPS1Message, LSPS1Request, LSPS1Response, OptionsSupported, OrderId, OrderParams,
+	OrderPayment, OrderState, LSPS1_CREATE_ORDER_REQUEST_ORDER_MISMATCH_ERROR_CODE,
 };
 use super::utils::is_valid;
 use crate::message_queue::MessageQueue;
@@ -376,16 +376,14 @@ where
 					self.enqueue_response(
 						&counterparty_node_id,
 						request_id,
-						LSPS1Response::GetOrder(GetOrderResponse {
-							response: CreateOrderResponse {
-								order_id,
-								order: config.order.clone(),
-								order_state,
-								created_at: config.created_at,
-								expires_at: config.expires_at,
-								payment: config.payment.clone(),
-								channel,
-							},
+						LSPS1Response::GetOrder(CreateOrderResponse {
+							order_id,
+							order: config.order.clone(),
+							order_state,
+							created_at: config.created_at,
+							expires_at: config.expires_at,
+							payment: config.payment.clone(),
+							channel,
 						}),
 					)
 				} else {
