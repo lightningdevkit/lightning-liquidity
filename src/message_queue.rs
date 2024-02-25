@@ -11,7 +11,10 @@ use bitcoin::secp256k1::PublicKey;
 /// [`LiquidityManager`]: crate::LiquidityManager
 pub struct MessageQueue {
 	queue: Mutex<VecDeque<(PublicKey, LSPSMessage)>>,
+	#[cfg(feature = "std")]
 	process_msgs_callback: RwLock<Option<Box<dyn Fn() + Send + Sync + 'static>>>,
+	#[cfg(feature = "no-std")]
+	process_msgs_callback: RwLock<Option<Box<dyn Fn() + 'static>>>,
 }
 
 impl MessageQueue {
@@ -21,7 +24,13 @@ impl MessageQueue {
 		Self { queue, process_msgs_callback }
 	}
 
+	#[cfg(feature = "std")]
 	pub(crate) fn set_process_msgs_callback(&self, callback: impl Fn() + Send + Sync + 'static) {
+		*self.process_msgs_callback.write().unwrap() = Some(Box::new(callback));
+	}
+
+	#[cfg(feature = "no-std")]
+	pub(crate) fn set_process_msgs_callback(&self, callback: impl Fn() + 'static) {
 		*self.process_msgs_callback.write().unwrap() = Some(Box::new(callback));
 	}
 
