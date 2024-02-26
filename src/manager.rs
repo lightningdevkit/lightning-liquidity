@@ -45,6 +45,9 @@ pub struct LiquidityServiceConfig {
 	/// Optional server-side configuration for JIT channels
 	/// should you want to support them.
 	pub lsps2_service_config: Option<LSPS2ServiceConfig>,
+	/// Controls whether the liquidity service should be advertised via setting the feature bit in
+	/// node announcment and the init message.
+	pub advertise_service: bool,
 }
 
 /// A client-side configuration for [`LiquidityManager`].
@@ -445,8 +448,12 @@ where
 	fn provided_node_features(&self) -> NodeFeatures {
 		let mut features = NodeFeatures::empty();
 
-		if self.service_config.is_some() {
-			features.set_optional_custom_bit(LSPS_FEATURE_BIT).unwrap();
+		let advertise_service = self.service_config.as_ref().map_or(false, |c| c.advertise_service);
+
+		if advertise_service {
+			features
+				.set_optional_custom_bit(LSPS_FEATURE_BIT)
+				.expect("Failed to set LSPS feature bit");
 		}
 
 		features
@@ -455,8 +462,11 @@ where
 	fn provided_init_features(&self, _their_node_id: &PublicKey) -> InitFeatures {
 		let mut features = InitFeatures::empty();
 
-		if self.service_config.is_some() {
-			features.set_optional_custom_bit(LSPS_FEATURE_BIT).unwrap();
+		let advertise_service = self.service_config.as_ref().map_or(false, |c| c.advertise_service);
+		if advertise_service {
+			features
+				.set_optional_custom_bit(LSPS_FEATURE_BIT)
+				.expect("Failed to set LSPS feature bit");
 		}
 
 		features
