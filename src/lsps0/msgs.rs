@@ -441,7 +441,7 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 					method
 				))),
 			},
-			None => match self.request_id_to_method_map.get(&id) {
+			None => match self.request_id_to_method_map.remove(&id) {
 				Some(method) => match method.as_str() {
 					LSPS0_LISTPROTOCOLS_METHOD_NAME => {
 						if let Some(error) = error {
