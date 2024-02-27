@@ -275,16 +275,16 @@ impl Serialize for LSPSMessage {
 						jsonrpc_object.serialize_field(JSONRPC_RESULT_FIELD_KEY, result)?
 					}
 					LSPS1Response::CreateOrder(result) => {
-						jsonrpc_object.serialize_field(JSONRPC_ERROR_FIELD_KEY, result)?
+						jsonrpc_object.serialize_field(JSONRPC_RESULT_FIELD_KEY, result)?
 					}
 					LSPS1Response::CreateOrderError(error) => {
-						jsonrpc_object.serialize_field(JSONRPC_RESULT_FIELD_KEY, error)?
+						jsonrpc_object.serialize_field(JSONRPC_ERROR_FIELD_KEY, error)?
 					}
 					LSPS1Response::GetOrder(result) => {
-						jsonrpc_object.serialize_field(JSONRPC_ERROR_FIELD_KEY, result)?
+						jsonrpc_object.serialize_field(JSONRPC_RESULT_FIELD_KEY, result)?
 					}
 					LSPS1Response::GetOrderError(error) => {
-						jsonrpc_object.serialize_field(JSONRPC_ERROR_FIELD_KEY, &error)?
+						jsonrpc_object.serialize_field(JSONRPC_ERROR_FIELD_KEY, error)?
 					}
 				}
 			}
