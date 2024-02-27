@@ -389,14 +389,10 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 
 		match method {
 			Some(method) => match method {
-				LSPS0_LISTPROTOCOLS_METHOD_NAME => {
-					self.request_id_to_method_map.insert(id.clone(), method.to_string());
-
-					Ok(LSPSMessage::LSPS0(LSPS0Message::Request(
-						RequestId(id),
-						LSPS0Request::ListProtocols(ListProtocolsRequest {}),
-					)))
-				}
+				LSPS0_LISTPROTOCOLS_METHOD_NAME => Ok(LSPSMessage::LSPS0(LSPS0Message::Request(
+					RequestId(id),
+					LSPS0Request::ListProtocols(ListProtocolsRequest {}),
+				))),
 				#[cfg(lsps1)]
 				LSPS1_GET_INFO_METHOD_NAME => {
 					let request = serde_json::from_value(params.unwrap_or(json!({})))
