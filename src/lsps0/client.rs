@@ -8,8 +8,8 @@ use crate::events::{Event, EventQueue};
 use crate::lsps0::event::LSPS0ClientEvent;
 use crate::lsps0::msgs::{
 	LSPS0Message, LSPS0Request, LSPS0Response, ListProtocolsRequest, ListProtocolsResponse,
-	ProtocolMessageHandler, ResponseError,
 };
+use crate::lsps0::ser::{ProtocolMessageHandler, ResponseError};
 use crate::message_queue::MessageQueue;
 use crate::sync::Arc;
 use crate::utils;
@@ -114,7 +114,7 @@ mod tests {
 	use alloc::string::ToString;
 	use alloc::sync::Arc;
 
-	use crate::lsps0::msgs::{LSPSMessage, RequestId};
+	use crate::lsps0::ser::{LSPSMessage, RequestId};
 	use crate::tests::utils::{self, TestEntropy};
 
 	use super::*;

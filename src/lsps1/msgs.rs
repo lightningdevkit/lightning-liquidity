@@ -1,7 +1,8 @@
 //! Message, request, and other primitive types used to implement LSPS1.
 
-use crate::lsps0::msgs::{LSPSMessage, RequestId, ResponseError};
-use crate::lsps0::ser::{string_amount, string_amount_option};
+use crate::lsps0::ser::{
+	string_amount, string_amount_option, LSPSMessage, RequestId, ResponseError,
+};
 
 use crate::prelude::{String, Vec};
 

@@ -18,11 +18,10 @@ use super::msgs::{
 use super::utils::is_valid;
 use crate::message_queue::MessageQueue;
 
-use crate::events::EventQueue;
-use crate::lsps0::msgs::{ProtocolMessageHandler, RequestId};
+use crate::events::{Event, EventQueue};
+use crate::lsps0::ser::{ProtocolMessageHandler, RequestId, ResponseError};
 use crate::prelude::{HashMap, String, ToString, Vec};
 use crate::sync::{Arc, Mutex, RwLock};
-use crate::{events::Event, lsps0::msgs::ResponseError};
 
 use lightning::chain::Filter;
 use lightning::ln::channelmanager::AChannelManager;

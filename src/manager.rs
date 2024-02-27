@@ -1,10 +1,10 @@
 use crate::events::{Event, EventQueue};
 use crate::lsps0::client::LSPS0ClientHandler;
-use crate::lsps0::msgs::{
-	LSPS0Message, LSPSMessage, ProtocolMessageHandler, RawLSPSMessage, RequestId,
+use crate::lsps0::msgs::LSPS0Message;
+use crate::lsps0::ser::{
+	LSPSMessage, LSPSMethod, ProtocolMessageHandler, RawLSPSMessage, RequestId,
 	LSPS_MESSAGE_TYPE_ID,
 };
-use crate::lsps0::ser::LSPSMethod;
 use crate::lsps0::service::LSPS0ServiceHandler;
 use crate::message_queue::MessageQueue;
 

@@ -10,7 +10,7 @@
 //! Contains LSPS2 event types
 
 use super::msgs::OpeningFeeParams;
-use crate::lsps0::msgs::RequestId;
+use crate::lsps0::ser::RequestId;
 use crate::prelude::{String, Vec};
 
 use bitcoin::secp256k1::PublicKey;

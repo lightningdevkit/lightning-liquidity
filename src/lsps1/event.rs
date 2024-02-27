@@ -11,7 +11,7 @@
 
 use super::msgs::{ChannelInfo, OptionsSupported, OrderId, OrderParams, OrderPayment};
 
-use crate::lsps0::msgs::RequestId;
+use crate::lsps0::ser::RequestId;
 use crate::prelude::String;
 
 use bitcoin::secp256k1::PublicKey;
