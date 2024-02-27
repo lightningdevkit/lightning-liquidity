@@ -194,7 +194,7 @@ pub struct ResponseError {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LSPSMessage {
 	/// An invalid variant.
-	Invalid,
+	Invalid(ResponseError),
 	/// An LSPS0 message.
 	LSPS0(LSPS0Message),
 	/// An LSPS1 message.
@@ -344,13 +344,7 @@ impl Serialize for LSPSMessage {
 					}
 				}
 			}
-			LSPSMessage::Invalid => {
-				let error = ResponseError {
-					code: JSONRPC_INVALID_MESSAGE_ERROR_CODE,
-					message: JSONRPC_INVALID_MESSAGE_ERROR_MESSAGE.to_string(),
-					data: None,
-				};
-
+			LSPSMessage::Invalid(error) => {
 				jsonrpc_object.serialize_field(JSONRPC_ID_FIELD_KEY, &serde_json::Value::Null)?;
 				jsonrpc_object.serialize_field(JSONRPC_ERROR_FIELD_KEY, &error)?;
 			}
@@ -404,13 +398,25 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 			}
 		}
 
-		let id = id.ok_or_else(|| {
-			if let Some(method) = method {
-				de::Error::custom(format!("Received unknown notification: {}", method))
-			} else {
-				de::Error::custom("Received invalid JSON-RPC object: one of method or id required")
+		let id = match id {
+			Some(id) => id,
+			None => {
+				if let Some(method) = method {
+					return Err(de::Error::custom(format!(
+						"Received unknown notification: {}",
+						method
+					)));
+				} else {
+					if let Some(error) = error {
+						if error.code == JSONRPC_INVALID_MESSAGE_ERROR_CODE {
+							return Ok(LSPSMessage::Invalid(error));
+						}
+					}
+
+					return Err(de::Error::custom("Received unknown error message"));
+				}
 			}
-		})?;
+		};
 
 		match method {
 			Some(method) => match method {

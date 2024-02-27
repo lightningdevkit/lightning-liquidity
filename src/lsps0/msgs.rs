@@ -74,7 +74,7 @@ impl TryFrom<LSPSMessage> for LSPS0Message {
 
 	fn try_from(message: LSPSMessage) -> Result<Self, Self::Error> {
 		match message {
-			LSPSMessage::Invalid => Err(()),
+			LSPSMessage::Invalid(_) => Err(()),
 			LSPSMessage::LSPS0(message) => Ok(message),
 			#[cfg(lsps1)]
 			LSPSMessage::LSPS1(_) => Err(()),

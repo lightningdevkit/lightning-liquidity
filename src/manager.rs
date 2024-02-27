@@ -2,7 +2,8 @@ use crate::events::{Event, EventQueue};
 use crate::lsps0::client::LSPS0ClientHandler;
 use crate::lsps0::msgs::LSPS0Message;
 use crate::lsps0::ser::{
-	LSPSMessage, LSPSMethod, ProtocolMessageHandler, RawLSPSMessage, RequestId,
+	LSPSMessage, LSPSMethod, ProtocolMessageHandler, RawLSPSMessage, RequestId, ResponseError,
+	JSONRPC_INVALID_MESSAGE_ERROR_CODE, JSONRPC_INVALID_MESSAGE_ERROR_MESSAGE,
 	LSPS_MESSAGE_TYPE_ID,
 };
 use crate::lsps0::service::LSPS0ServiceHandler;
@@ -18,7 +19,7 @@ use crate::lsps1::service::{LSPS1ServiceConfig, LSPS1ServiceHandler};
 use crate::lsps2::client::{LSPS2ClientConfig, LSPS2ClientHandler};
 use crate::lsps2::msgs::LSPS2Message;
 use crate::lsps2::service::{LSPS2ServiceConfig, LSPS2ServiceHandler};
-use crate::prelude::{HashMap, Vec};
+use crate::prelude::{HashMap, ToString, Vec};
 use crate::sync::{Arc, Mutex, RwLock};
 
 use lightning::chain::{self, BestBlock, Confirm, Filter, Listen};
@@ -330,7 +331,7 @@ where {
 		&self, msg: LSPSMessage, sender_node_id: &PublicKey,
 	) -> Result<(), lightning::ln::msgs::LightningError> {
 		match msg {
-			LSPSMessage::Invalid => {
+			LSPSMessage::Invalid(_error) => {
 				return Err(LightningError { err: format!("{} did not understand a message we previously sent, maybe they don't support a protocol we are trying to use?", sender_node_id), action: ErrorAction::IgnoreAndLog(Level::Error)});
 			}
 			LSPSMessage::LSPS0(msg @ LSPS0Message::Response(..)) => {
@@ -422,7 +423,13 @@ where
 			let mut request_id_to_method_map = self.request_id_to_method_map.lock().unwrap();
 			LSPSMessage::from_str_with_id_map(&msg.payload, &mut request_id_to_method_map).map_err(
 				|_| {
-					self.pending_messages.enqueue(sender_node_id, LSPSMessage::Invalid);
+					let error = ResponseError {
+						code: JSONRPC_INVALID_MESSAGE_ERROR_CODE,
+						message: JSONRPC_INVALID_MESSAGE_ERROR_MESSAGE.to_string(),
+						data: None,
+					};
+
+					self.pending_messages.enqueue(sender_node_id, LSPSMessage::Invalid(error));
 					let err = format!("Failed to deserialize invalid LSPS message.");
 					let err_msg =
 						Some(ErrorMessage { channel_id: ChannelId([0; 32]), data: err.clone() });
