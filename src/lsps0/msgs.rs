@@ -274,6 +274,9 @@ impl Serialize for LSPSMessage {
 					LSPS1Response::GetInfo(result) => {
 						jsonrpc_object.serialize_field(JSONRPC_RESULT_FIELD_KEY, result)?
 					}
+					LSPS1Response::GetInfoError(error) => {
+						jsonrpc_object.serialize_field(JSONRPC_ERROR_FIELD_KEY, error)?
+					}
 					LSPS1Response::CreateOrder(result) => {
 						jsonrpc_object.serialize_field(JSONRPC_RESULT_FIELD_KEY, result)?
 					}
@@ -455,6 +458,24 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 						}
 					}
 					#[cfg(lsps1)]
+					LSPSMethod::LSPS1GetInfo => {
+						if let Some(error) = error {
+							Ok(LSPSMessage::LSPS1(LSPS1Message::Response(
+								id,
+								LSPS1Response::GetInfoError(error),
+							)))
+						} else if let Some(result) = result {
+							let response =
+								serde_json::from_value(result).map_err(de::Error::custom)?;
+							Ok(LSPSMessage::LSPS1(LSPS1Message::Response(
+								id,
+								LSPS1Response::GetInfo(response),
+							)))
+						} else {
+							Err(de::Error::custom("Received invalid JSON-RPC object: one of method, result, or error required"))
+						}
+					}
+					#[cfg(lsps1)]
 					LSPSMethod::LSPS1CreateOrder => {
 						if let Some(error) = error {
 							Ok(LSPSMessage::LSPS1(LSPS1Message::Response(
@@ -524,10 +545,6 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 							Err(de::Error::custom("Received invalid JSON-RPC object: one of method, result, or error required"))
 						}
 					}
-					_ => Err(de::Error::custom(format!(
-						"Received response for an unknown request method: {}",
-						method
-					))),
 				},
 				None => Err(de::Error::custom(format!(
 					"Received response for unknown request id: {}",

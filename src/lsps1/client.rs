@@ -318,6 +318,41 @@ where
 		Ok(())
 	}
 
+	fn handle_get_info_error(
+		&self, request_id: RequestId, counterparty_node_id: &PublicKey, error: ResponseError,
+	) -> Result<(), LightningError> {
+		let outer_state_lock = self.per_peer_state.read().unwrap();
+		match outer_state_lock.get(&counterparty_node_id) {
+			Some(inner_state_lock) => {
+				let mut peer_state_lock = inner_state_lock.lock().unwrap();
+
+				let user_channel_id =
+					peer_state_lock.request_to_cid.remove(&request_id).ok_or(LightningError {
+						err: format!(
+							"Received GetInfo error for an unknown request: {:?}",
+							request_id
+						),
+						action: ErrorAction::IgnoreAndLog(Level::Debug),
+					})?;
+
+				let inbound_channel = peer_state_lock
+					.inbound_channels_by_id
+					.get_mut(&user_channel_id)
+					.ok_or(LightningError {
+						err: format!(
+							"Received GetInfo error for an unknown channel: {:?}",
+							user_channel_id
+						),
+						action: ErrorAction::IgnoreAndLog(Level::Info),
+					})?;
+				Ok(())
+			}
+			None => {
+				return Err(LightningError { err: format!("Received error response for a create order request from an unknown counterparty ({:?})",counterparty_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
+			}
+		}
+	}
+
 	/// Places an order with the connected LSP given its `counterparty_node_id`.
 	/// The client agrees to paying channel fees according to the provided parameters.
 	///
@@ -621,11 +656,14 @@ where
 				LSPS1Response::GetInfo(params) => {
 					self.handle_get_info_response(request_id, counterparty_node_id, params)
 				}
+				LSPS1Response::GetInfoError(error) => {
+					self.handle_get_info_error(request_id, counterparty_node_id, error)
+				}
 				LSPS1Response::CreateOrder(params) => {
 					self.handle_create_order_response(request_id, counterparty_node_id, params)
 				}
-				LSPS1Response::CreateOrderError(params) => {
-					self.handle_create_order_error(request_id, counterparty_node_id, params)
+				LSPS1Response::CreateOrderError(error) => {
+					self.handle_create_order_error(request_id, counterparty_node_id, error)
 				}
 				LSPS1Response::GetOrder(params) => {
 					self.handle_get_order_response(request_id, counterparty_node_id, params)

@@ -254,6 +254,8 @@ pub enum LSPS1Request {
 pub enum LSPS1Response {
 	/// A successful response to a [`GetInfoRequest`].
 	GetInfo(GetInfoResponse),
+	/// An error response to a [`GetInfoRequest`].
+	GetInfoError(ResponseError),
 	/// A successful response to a [`CreateOrderRequest`].
 	CreateOrder(CreateOrderResponse),
 	/// An error response to a [`CreateOrderRequest`].
