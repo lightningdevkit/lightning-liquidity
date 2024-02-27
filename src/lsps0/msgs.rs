@@ -359,7 +359,7 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 		while let Some(key) = map.next_key()? {
 			match key {
 				"id" => {
-					id = Some(map.next_value()?);
+					id = map.next_value()?;
 				}
 				"method" => {
 					method = Some(map.next_value()?);
@@ -379,8 +379,16 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 			}
 		}
 
-		match (id, method) {
-			(Some(id), Some(method)) => match method {
+		let id = id.ok_or_else(|| {
+			if let Some(method) = method {
+				de::Error::custom(format!("Received unknown notification: {}", method))
+			} else {
+				de::Error::custom("Received invalid JSON-RPC object: one of method or id required")
+			}
+		})?;
+
+		match method {
+			Some(method) => match method {
 				LSPS0_LISTPROTOCOLS_METHOD_NAME => {
 					self.request_id_to_method.insert(id.clone(), method.to_string());
 
@@ -437,7 +445,7 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 					method
 				))),
 			},
-			(Some(id), None) => match self.request_id_to_method.get(&id) {
+			None => match self.request_id_to_method.get(&id) {
 				Some(method) => match method.as_str() {
 					LSPS0_LISTPROTOCOLS_METHOD_NAME => {
 						if let Some(error) = error {
@@ -536,12 +544,6 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 					id
 				))),
 			},
-			(None, Some(method)) => {
-				Err(de::Error::custom(format!("Received unknown notification: {}", method)))
-			}
-			(None, None) => Err(de::Error::custom(
-				"Received invalid JSON-RPC object: one of method or id required",
-			)),
 		}
 	}
 }
