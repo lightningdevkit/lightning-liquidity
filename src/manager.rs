@@ -22,9 +22,10 @@ use crate::sync::{Arc, Mutex, RwLock};
 use lightning::chain::{self, BestBlock, Confirm, Filter, Listen};
 use lightning::ln::channelmanager::{AChannelManager, ChainParameters};
 use lightning::ln::features::{InitFeatures, NodeFeatures};
-use lightning::ln::msgs::{ErrorAction, LightningError};
+use lightning::ln::msgs::{ErrorAction, ErrorMessage, LightningError};
 use lightning::ln::peer_handler::CustomMessageHandler;
 use lightning::ln::wire::CustomMessageReader;
+use lightning::ln::ChannelId;
 use lightning::sign::EntropySource;
 use lightning::util::logger::Level;
 use lightning::util::ser::Readable;
@@ -416,16 +417,18 @@ where
 	) -> Result<(), lightning::ln::msgs::LightningError> {
 		let message = {
 			let mut request_id_to_method_map = self.request_id_to_method_map.lock().unwrap();
-			LSPSMessage::from_str_with_id_map(&msg.payload, &mut request_id_to_method_map)
+			LSPSMessage::from_str_with_id_map(&msg.payload, &mut request_id_to_method_map).map_err(
+				|_| {
+					self.pending_messages.enqueue(sender_node_id, LSPSMessage::Invalid);
+					let err = format!("Failed to deserialize invalid LSPS message.");
+					let err_msg =
+						Some(ErrorMessage { channel_id: ChannelId([0; 32]), data: err.clone() });
+					LightningError { err, action: ErrorAction::DisconnectPeer { msg: err_msg } }
+				},
+			)?
 		};
 
-		match message {
-			Ok(msg) => self.handle_lsps_message(msg, sender_node_id),
-			Err(_) => {
-				self.pending_messages.enqueue(sender_node_id, LSPSMessage::Invalid);
-				Ok(())
-			}
-		}
+		self.handle_lsps_message(message, sender_node_id)
 	}
 
 	fn get_and_clear_pending_msg(&self) -> Vec<(PublicKey, Self::CustomMessage)> {
