@@ -191,10 +191,10 @@ impl LSPSMessage {
 	/// The given `request_id_to_method` associates request ids with method names, as response objects
 	/// don't carry the latter.
 	pub fn from_str_with_id_map(
-		json_str: &str, request_id_to_method: &mut HashMap<String, String>,
+		json_str: &str, request_id_to_method_map: &mut HashMap<String, String>,
 	) -> Result<Self, serde_json::Error> {
 		let deserializer = &mut serde_json::Deserializer::from_str(json_str);
-		let visitor = LSPSMessageVisitor { request_id_to_method };
+		let visitor = LSPSMessageVisitor { request_id_to_method_map };
 		deserializer.deserialize_any(visitor)
 	}
 
@@ -336,7 +336,7 @@ impl Serialize for LSPSMessage {
 }
 
 struct LSPSMessageVisitor<'a> {
-	request_id_to_method: &'a mut HashMap<String, String>,
+	request_id_to_method_map: &'a mut HashMap<String, String>,
 }
 
 impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
@@ -390,7 +390,7 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 		match method {
 			Some(method) => match method {
 				LSPS0_LISTPROTOCOLS_METHOD_NAME => {
-					self.request_id_to_method.insert(id.clone(), method.to_string());
+					self.request_id_to_method_map.insert(id.clone(), method.to_string());
 
 					Ok(LSPSMessage::LSPS0(LSPS0Message::Request(
 						RequestId(id),
@@ -445,7 +445,7 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 					method
 				))),
 			},
-			None => match self.request_id_to_method.get(&id) {
+			None => match self.request_id_to_method_map.get(&id) {
 				Some(method) => match method.as_str() {
 					LSPS0_LISTPROTOCOLS_METHOD_NAME => {
 						if let Some(error) = error {
