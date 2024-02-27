@@ -2,14 +2,11 @@
 //!
 //! Please refer to the [LSPS0 specification](https://github.com/BitcoinAndLightningLayerSpecs/lsp/tree/main/LSPS0) for more information.
 
+use crate::lsps0::ser::LSPSMethod;
+
 #[cfg(lsps1)]
-use crate::lsps1::msgs::{
-	LSPS1Message, LSPS1Request, LSPS1Response, LSPS1_CREATE_ORDER_METHOD_NAME,
-	LSPS1_GET_INFO_METHOD_NAME, LSPS1_GET_ORDER_METHOD_NAME,
-};
-use crate::lsps2::msgs::{
-	LSPS2Message, LSPS2Request, LSPS2Response, LSPS2_BUY_METHOD_NAME, LSPS2_GET_INFO_METHOD_NAME,
-};
+use crate::lsps1::msgs::{LSPS1Message, LSPS1Request, LSPS1Response};
+use crate::lsps2::msgs::{LSPS2Message, LSPS2Request, LSPS2Response};
 use crate::prelude::{HashMap, String, ToString, Vec};
 
 use lightning::impl_writeable_msg;
@@ -37,7 +34,7 @@ const JSONRPC_RESULT_FIELD_KEY: &str = "result";
 const JSONRPC_ERROR_FIELD_KEY: &str = "error";
 const JSONRPC_INVALID_MESSAGE_ERROR_CODE: i32 = -32700;
 const JSONRPC_INVALID_MESSAGE_ERROR_MESSAGE: &str = "parse error";
-const LSPS0_LISTPROTOCOLS_METHOD_NAME: &str = "lsps0.list_protocols";
+pub(crate) const LSPS0_LISTPROTOCOLS_METHOD_NAME: &str = "lsps0.list_protocols";
 
 /// The Lightning message type id for LSPS messages.
 pub const LSPS_MESSAGE_TYPE_ID: u16 = 37913;
@@ -74,7 +71,8 @@ impl wire::Type for RawLSPSMessage {
 ///
 /// Please refer to the [JSON-RPC 2.0 specification](https://www.jsonrpc.org/specification#request_object) for
 /// more information.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[serde(transparent)]
 pub struct RequestId(pub String);
 
 /// An error returned in response to an JSON-RPC request.
@@ -190,8 +188,8 @@ impl LSPSMessage {
 	///
 	/// The given `request_id_to_method` associates request ids with method names, as response objects
 	/// don't carry the latter.
-	pub fn from_str_with_id_map(
-		json_str: &str, request_id_to_method_map: &mut HashMap<String, String>,
+	pub(crate) fn from_str_with_id_map(
+		json_str: &str, request_id_to_method_map: &mut HashMap<RequestId, LSPSMethod>,
 	) -> Result<Self, serde_json::Error> {
 		let deserializer = &mut serde_json::Deserializer::from_str(json_str);
 		let visitor = LSPSMessageVisitor { request_id_to_method_map };
@@ -199,17 +197,17 @@ impl LSPSMessage {
 	}
 
 	/// Returns the request id and the method.
-	pub fn get_request_id_and_method(&self) -> Option<(String, String)> {
+	pub(crate) fn get_request_id_and_method(&self) -> Option<(RequestId, LSPSMethod)> {
 		match self {
 			LSPSMessage::LSPS0(LSPS0Message::Request(request_id, request)) => {
-				Some((request_id.0.clone(), request.method().to_string()))
+				Some((RequestId(request_id.0.clone()), request.into()))
 			}
 			#[cfg(lsps1)]
 			LSPSMessage::LSPS1(LSPS1Message::Request(request_id, request)) => {
-				Some((request_id.0.clone(), request.method().to_string()))
+				Some((RequestId(request_id.0.clone()), request.into()))
 			}
 			LSPSMessage::LSPS2(LSPS2Message::Request(request_id, request)) => {
-				Some((request_id.0.clone(), request.method().to_string()))
+				Some((RequestId(request_id.0.clone()), request.into()))
 			}
 			_ => None,
 		}
@@ -228,8 +226,9 @@ impl Serialize for LSPSMessage {
 
 		match self {
 			LSPSMessage::LSPS0(LSPS0Message::Request(request_id, request)) => {
-				jsonrpc_object.serialize_field(JSONRPC_METHOD_FIELD_KEY, request.method())?;
 				jsonrpc_object.serialize_field(JSONRPC_ID_FIELD_KEY, &request_id.0)?;
+				jsonrpc_object
+					.serialize_field(JSONRPC_METHOD_FIELD_KEY, &LSPSMethod::from(request))?;
 
 				match request {
 					LSPS0Request::ListProtocols(params) => {
@@ -252,7 +251,8 @@ impl Serialize for LSPSMessage {
 			#[cfg(lsps1)]
 			LSPSMessage::LSPS1(LSPS1Message::Request(request_id, request)) => {
 				jsonrpc_object.serialize_field(JSONRPC_ID_FIELD_KEY, &request_id.0)?;
-				jsonrpc_object.serialize_field(JSONRPC_METHOD_FIELD_KEY, request.method())?;
+				jsonrpc_object
+					.serialize_field(JSONRPC_METHOD_FIELD_KEY, &LSPSMethod::from(request))?;
 
 				match request {
 					LSPS1Request::GetInfo(params) => {
@@ -290,7 +290,8 @@ impl Serialize for LSPSMessage {
 			}
 			LSPSMessage::LSPS2(LSPS2Message::Request(request_id, request)) => {
 				jsonrpc_object.serialize_field(JSONRPC_ID_FIELD_KEY, &request_id.0)?;
-				jsonrpc_object.serialize_field(JSONRPC_METHOD_FIELD_KEY, request.method())?;
+				jsonrpc_object
+					.serialize_field(JSONRPC_METHOD_FIELD_KEY, &LSPSMethod::from(request))?;
 
 				match request {
 					LSPS2Request::GetInfo(params) => {
@@ -336,7 +337,7 @@ impl Serialize for LSPSMessage {
 }
 
 struct LSPSMessageVisitor<'a> {
-	request_id_to_method_map: &'a mut HashMap<String, String>,
+	request_id_to_method_map: &'a mut HashMap<RequestId, LSPSMethod>,
 }
 
 impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
@@ -350,8 +351,8 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 	where
 		A: MapAccess<'de>,
 	{
-		let mut id: Option<String> = None;
-		let mut method: Option<&str> = None;
+		let mut id: Option<RequestId> = None;
+		let mut method: Option<LSPSMethod> = None;
 		let mut params = None;
 		let mut result = None;
 		let mut error: Option<ResponseError> = None;
@@ -389,71 +390,64 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 
 		match method {
 			Some(method) => match method {
-				LSPS0_LISTPROTOCOLS_METHOD_NAME => Ok(LSPSMessage::LSPS0(LSPS0Message::Request(
-					RequestId(id),
+				LSPSMethod::LSPS0ListProtocols => Ok(LSPSMessage::LSPS0(LSPS0Message::Request(
+					id,
 					LSPS0Request::ListProtocols(ListProtocolsRequest {}),
 				))),
 				#[cfg(lsps1)]
-				LSPS1_GET_INFO_METHOD_NAME => {
+				LSPSMethod::LSPS1GetInfo => {
 					let request = serde_json::from_value(params.unwrap_or(json!({})))
 						.map_err(de::Error::custom)?;
 					Ok(LSPSMessage::LSPS1(LSPS1Message::Request(
-						RequestId(id),
+						id,
 						LSPS1Request::GetInfo(request),
 					)))
 				}
 				#[cfg(lsps1)]
-				LSPS1_CREATE_ORDER_METHOD_NAME => {
+				LSPSMethod::LSPS1CreateOrder => {
 					let request = serde_json::from_value(params.unwrap_or(json!({})))
 						.map_err(de::Error::custom)?;
 					Ok(LSPSMessage::LSPS1(LSPS1Message::Request(
-						RequestId(id),
+						id,
 						LSPS1Request::CreateOrder(request),
 					)))
 				}
 				#[cfg(lsps1)]
-				LSPS1_GET_ORDER_METHOD_NAME => {
+				LSPSMethod::LSPS1GetOrder => {
 					let request = serde_json::from_value(params.unwrap_or(json!({})))
 						.map_err(de::Error::custom)?;
 					Ok(LSPSMessage::LSPS1(LSPS1Message::Request(
-						RequestId(id),
+						id,
 						LSPS1Request::GetOrder(request),
 					)))
 				}
-				LSPS2_GET_INFO_METHOD_NAME => {
+				LSPSMethod::LSPS2GetInfo => {
 					let request = serde_json::from_value(params.unwrap_or(json!({})))
 						.map_err(de::Error::custom)?;
 					Ok(LSPSMessage::LSPS2(LSPS2Message::Request(
-						RequestId(id),
+						id,
 						LSPS2Request::GetInfo(request),
 					)))
 				}
-				LSPS2_BUY_METHOD_NAME => {
+				LSPSMethod::LSPS2Buy => {
 					let request = serde_json::from_value(params.unwrap_or(json!({})))
 						.map_err(de::Error::custom)?;
-					Ok(LSPSMessage::LSPS2(LSPS2Message::Request(
-						RequestId(id),
-						LSPS2Request::Buy(request),
-					)))
+					Ok(LSPSMessage::LSPS2(LSPS2Message::Request(id, LSPS2Request::Buy(request))))
 				}
-				_ => Err(de::Error::custom(format!(
-					"Received request with unknown method: {}",
-					method
-				))),
 			},
 			None => match self.request_id_to_method_map.remove(&id) {
-				Some(method) => match method.as_str() {
-					LSPS0_LISTPROTOCOLS_METHOD_NAME => {
+				Some(method) => match method {
+					LSPSMethod::LSPS0ListProtocols => {
 						if let Some(error) = error {
 							Ok(LSPSMessage::LSPS0(LSPS0Message::Response(
-								RequestId(id),
+								id,
 								LSPS0Response::ListProtocolsError(error),
 							)))
 						} else if let Some(result) = result {
 							let list_protocols_response =
 								serde_json::from_value(result).map_err(de::Error::custom)?;
 							Ok(LSPSMessage::LSPS0(LSPS0Message::Response(
-								RequestId(id),
+								id,
 								LSPS0Response::ListProtocols(list_protocols_response),
 							)))
 						} else {
@@ -461,17 +455,17 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 						}
 					}
 					#[cfg(lsps1)]
-					LSPS1_CREATE_ORDER_METHOD_NAME => {
+					LSPSMethod::LSPS1CreateOrder => {
 						if let Some(error) = error {
 							Ok(LSPSMessage::LSPS1(LSPS1Message::Response(
-								RequestId(id),
+								id,
 								LSPS1Response::CreateOrderError(error),
 							)))
 						} else if let Some(result) = result {
 							let response =
 								serde_json::from_value(result).map_err(de::Error::custom)?;
 							Ok(LSPSMessage::LSPS1(LSPS1Message::Response(
-								RequestId(id),
+								id,
 								LSPS1Response::CreateOrder(response),
 							)))
 						} else {
@@ -479,51 +473,51 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 						}
 					}
 					#[cfg(lsps1)]
-					LSPS1_GET_ORDER_METHOD_NAME => {
+					LSPSMethod::LSPS1GetOrder => {
 						if let Some(error) = error {
 							Ok(LSPSMessage::LSPS1(LSPS1Message::Response(
-								RequestId(id),
+								id,
 								LSPS1Response::GetOrderError(error),
 							)))
 						} else if let Some(result) = result {
 							let response =
 								serde_json::from_value(result).map_err(de::Error::custom)?;
 							Ok(LSPSMessage::LSPS1(LSPS1Message::Response(
-								RequestId(id),
+								id,
 								LSPS1Response::GetOrder(response),
 							)))
 						} else {
 							Err(de::Error::custom("Received invalid JSON-RPC object: one of method, result, or error required"))
 						}
 					}
-					LSPS2_GET_INFO_METHOD_NAME => {
+					LSPSMethod::LSPS2GetInfo => {
 						if let Some(error) = error {
 							Ok(LSPSMessage::LSPS2(LSPS2Message::Response(
-								RequestId(id),
+								id,
 								LSPS2Response::GetInfoError(error),
 							)))
 						} else if let Some(result) = result {
 							let response =
 								serde_json::from_value(result).map_err(de::Error::custom)?;
 							Ok(LSPSMessage::LSPS2(LSPS2Message::Response(
-								RequestId(id),
+								id,
 								LSPS2Response::GetInfo(response),
 							)))
 						} else {
 							Err(de::Error::custom("Received invalid JSON-RPC object: one of method, result, or error required"))
 						}
 					}
-					LSPS2_BUY_METHOD_NAME => {
+					LSPSMethod::LSPS2Buy => {
 						if let Some(error) = error {
 							Ok(LSPSMessage::LSPS2(LSPS2Message::Response(
-								RequestId(id),
+								id,
 								LSPS2Response::BuyError(error),
 							)))
 						} else if let Some(result) = result {
 							let response =
 								serde_json::from_value(result).map_err(de::Error::custom)?;
 							Ok(LSPSMessage::LSPS2(LSPS2Message::Response(
-								RequestId(id),
+								id,
 								LSPS2Response::Buy(response),
 							)))
 						} else {
@@ -537,7 +531,7 @@ impl<'de, 'a> Visitor<'de> for LSPSMessageVisitor<'a> {
 				},
 				None => Err(de::Error::custom(format!(
 					"Received response for unknown request id: {}",
-					id
+					id.0
 				))),
 			},
 		}
@@ -579,7 +573,7 @@ mod tests {
 		let json = serde_json::to_string(&request).unwrap();
 		assert_eq!(
 			json,
-			r#"{"jsonrpc":"2.0","method":"lsps0.list_protocols","id":"request:id:xyz123","params":{}}"#
+			r#"{"jsonrpc":"2.0","id":"request:id:xyz123","method":"lsps0.list_protocols","params":{}}"#
 		);
 	}
 
@@ -594,7 +588,7 @@ mod tests {
 	    }"#;
 		let mut request_id_to_method_map = HashMap::new();
 		request_id_to_method_map
-			.insert("request:id:xyz123".to_string(), "lsps0.list_protocols".to_string());
+			.insert(RequestId("request:id:xyz123".to_string()), LSPSMethod::LSPS0ListProtocols);
 
 		let response =
 			LSPSMessage::from_str_with_id_map(json, &mut request_id_to_method_map).unwrap();
@@ -620,7 +614,7 @@ mod tests {
 	    }"#;
 		let mut request_id_to_method_map = HashMap::new();
 		request_id_to_method_map
-			.insert("request:id:xyz123".to_string(), "lsps0.list_protocols".to_string());
+			.insert(RequestId("request:id:xyz123".to_string()), LSPSMethod::LSPS0ListProtocols);
 
 		let response =
 			LSPSMessage::from_str_with_id_map(json, &mut request_id_to_method_map).unwrap();
@@ -649,7 +643,7 @@ mod tests {
 	    }"#;
 		let mut request_id_to_method_map = HashMap::new();
 		request_id_to_method_map
-			.insert("request:id:xyz123".to_string(), "lsps0.list_protocols".to_string());
+			.insert(RequestId("request:id:xyz123".to_string()), LSPSMethod::LSPS0ListProtocols);
 
 		let response = LSPSMessage::from_str_with_id_map(json, &mut request_id_to_method_map);
 		assert!(response.is_err());

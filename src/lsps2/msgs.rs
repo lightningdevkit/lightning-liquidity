@@ -166,16 +166,6 @@ pub enum LSPS2Request {
 	Buy(BuyRequest),
 }
 
-impl LSPS2Request {
-	/// Get the JSON-RPC method name for the underlying request.
-	pub fn method(&self) -> &str {
-		match self {
-			LSPS2Request::GetInfo(_) => LSPS2_GET_INFO_METHOD_NAME,
-			LSPS2Request::Buy(_) => LSPS2_BUY_METHOD_NAME,
-		}
-	}
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// An enum that captures all the valid JSON-RPC responses in the LSPS2 protocol.
 pub enum LSPS2Response {
