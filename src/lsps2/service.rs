@@ -1142,6 +1142,8 @@ fn calculate_amount_to_forward_per_htlc(
 mod tests {
 
 	use super::*;
+	use chrono::TimeZone;
+	use chrono::Utc;
 	use proptest::prelude::*;
 
 	const MAX_VALUE_MSAT: u64 = 21_000_000_0000_0000_000;
@@ -1229,5 +1231,338 @@ mod tests {
 				(htlcs[2].intercept_id, 1),
 			]
 		);
+	}
+
+	#[test]
+	fn test_jit_channel_state_mpp() {
+		let payment_size_msat = Some(500_000_000);
+		let opening_fee_params = OpeningFeeParams {
+			min_fee_msat: 10_000_000,
+			proportional: 10_000,
+			valid_until: Utc.timestamp_opt(3000, 0).unwrap(),
+			min_lifetime: 4032,
+			max_client_to_self_delay: 2016,
+			min_payment_size_msat: 10_000_000,
+			max_payment_size_msat: 1_000_000_000,
+			promise: "ignore".to_string(),
+		};
+		let mut state = OutboundJITChannelState::new();
+		// Intercepts the first HTLC of a multipart payment A.
+		{
+			let (new_state, action) = state
+				.htlc_intercepted(
+					&opening_fee_params,
+					&payment_size_msat,
+					InterceptedHTLC {
+						intercept_id: InterceptId([0; 32]),
+						expected_outbound_amount_msat: 200_000_000,
+						payment_hash: PaymentHash([100; 32]),
+					},
+				)
+				.unwrap();
+			assert!(matches!(new_state, OutboundJITChannelState::PendingInitialPayment { .. }));
+			assert!(action.is_none());
+			state = new_state;
+		}
+		// Intercepts the first HTLC of a different multipart payment B.
+		{
+			let (new_state, action) = state
+				.htlc_intercepted(
+					&opening_fee_params,
+					&payment_size_msat,
+					InterceptedHTLC {
+						intercept_id: InterceptId([1; 32]),
+						expected_outbound_amount_msat: 1_000_000,
+						payment_hash: PaymentHash([101; 32]),
+					},
+				)
+				.unwrap();
+			assert!(matches!(new_state, OutboundJITChannelState::PendingInitialPayment { .. }));
+			assert!(action.is_none());
+			state = new_state;
+		}
+		// Intercepts the second HTLC of multipart payment A, completing the expected payment and
+		// opening the channel.
+		{
+			let (new_state, action) = state
+				.htlc_intercepted(
+					&opening_fee_params,
+					&payment_size_msat,
+					InterceptedHTLC {
+						intercept_id: InterceptId([2; 32]),
+						expected_outbound_amount_msat: 300_000_000,
+						payment_hash: PaymentHash([100; 32]),
+					},
+				)
+				.unwrap();
+			assert!(matches!(new_state, OutboundJITChannelState::PendingChannelOpen { .. }));
+			assert!(matches!(action, Some(HTLCInterceptedAction::OpenChannel(_))));
+			state = new_state;
+		}
+		// Channel opens, becomes ready, and multipart payment A gets forwarded.
+		{
+			let (new_state, ForwardPaymentAction(channel_id, payment)) =
+				state.channel_ready(ChannelId([200; 32])).unwrap();
+			assert_eq!(channel_id, ChannelId([200; 32]));
+			assert_eq!(payment.opening_fee_msat, 10_000_000);
+			assert_eq!(
+				payment.htlcs,
+				vec![
+					InterceptedHTLC {
+						intercept_id: InterceptId([0; 32]),
+						expected_outbound_amount_msat: 200_000_000,
+						payment_hash: PaymentHash([100; 32]),
+					},
+					InterceptedHTLC {
+						intercept_id: InterceptId([2; 32]),
+						expected_outbound_amount_msat: 300_000_000,
+						payment_hash: PaymentHash([100; 32]),
+					},
+				]
+			);
+			state = new_state;
+		}
+		// Intercepts the first HTLC of a different payment C.
+		{
+			let (new_state, action) = state
+				.htlc_intercepted(
+					&opening_fee_params,
+					&payment_size_msat,
+					InterceptedHTLC {
+						intercept_id: InterceptId([3; 32]),
+						expected_outbound_amount_msat: 2_000_000,
+						payment_hash: PaymentHash([102; 32]),
+					},
+				)
+				.unwrap();
+			assert!(matches!(new_state, OutboundJITChannelState::PendingPaymentForward { .. }));
+			assert!(action.is_none());
+			state = new_state;
+		}
+		// Payment A fails.
+		{
+			let (new_state, action) = state.htlc_handling_failed().unwrap();
+			assert!(matches!(new_state, OutboundJITChannelState::PendingPayment { .. }));
+			// No payments have received sufficient HTLCs yet.
+			assert!(action.is_none());
+			state = new_state;
+		}
+		// Additional HTLC of payment B arrives, completing the expectd payment.
+		{
+			let (new_state, action) = state
+				.htlc_intercepted(
+					&opening_fee_params,
+					&payment_size_msat,
+					InterceptedHTLC {
+						intercept_id: InterceptId([4; 32]),
+						expected_outbound_amount_msat: 500_000_000,
+						payment_hash: PaymentHash([101; 32]),
+					},
+				)
+				.unwrap();
+			assert!(matches!(new_state, OutboundJITChannelState::PendingPaymentForward { .. }));
+			match action {
+				Some(HTLCInterceptedAction::ForwardPayment(channel_id, payment)) => {
+					assert_eq!(channel_id, ChannelId([200; 32]));
+					assert_eq!(payment.opening_fee_msat, 10_000_000);
+					assert_eq!(
+						payment.htlcs,
+						vec![
+							InterceptedHTLC {
+								intercept_id: InterceptId([1; 32]),
+								expected_outbound_amount_msat: 1_000_000,
+								payment_hash: PaymentHash([101; 32]),
+							},
+							InterceptedHTLC {
+								intercept_id: InterceptId([4; 32]),
+								expected_outbound_amount_msat: 500_000_000,
+								payment_hash: PaymentHash([101; 32]),
+							},
+						]
+					);
+				},
+				_ => panic!("Unexpected action when intercepted HTLC."),
+			}
+			state = new_state;
+		}
+		// Payment completes, queued payments get forwarded.
+		{
+			let (new_state, action) = state.payment_forwarded().unwrap();
+			assert!(matches!(new_state, OutboundJITChannelState::PaymentForwarded { .. }));
+			match action {
+				Some(ForwardHTLCsAction(channel_id, htlcs)) => {
+					assert_eq!(channel_id, ChannelId([200; 32]));
+					assert_eq!(
+						htlcs,
+						vec![InterceptedHTLC {
+							intercept_id: InterceptId([3; 32]),
+							expected_outbound_amount_msat: 2_000_000,
+							payment_hash: PaymentHash([102; 32]),
+						}]
+					);
+				},
+				_ => panic!("Unexpected action when forwarded payment."),
+			}
+			state = new_state;
+		}
+		// Any new HTLC gets automatically forwarded.
+		{
+			let (new_state, action) = state
+				.htlc_intercepted(
+					&opening_fee_params,
+					&payment_size_msat,
+					InterceptedHTLC {
+						intercept_id: InterceptId([5; 32]),
+						expected_outbound_amount_msat: 200_000_000,
+						payment_hash: PaymentHash([103; 32]),
+					},
+				)
+				.unwrap();
+			assert!(matches!(new_state, OutboundJITChannelState::PaymentForwarded { .. }));
+			assert!(
+				matches!(action, Some(HTLCInterceptedAction::ForwardHTLC(channel_id)) if channel_id == ChannelId([200; 32]))
+			);
+		}
+	}
+
+	#[test]
+	fn test_jit_channel_state_no_mpp() {
+		let payment_size_msat = None;
+		let opening_fee_params = OpeningFeeParams {
+			min_fee_msat: 10_000_000,
+			proportional: 10_000,
+			valid_until: Utc.timestamp_opt(3000, 0).unwrap(),
+			min_lifetime: 4032,
+			max_client_to_self_delay: 2016,
+			min_payment_size_msat: 10_000_000,
+			max_payment_size_msat: 1_000_000_000,
+			promise: "ignore".to_string(),
+		};
+		let mut state = OutboundJITChannelState::new();
+		// Intercepts payment A, opening the channel.
+		{
+			let (new_state, action) = state
+				.htlc_intercepted(
+					&opening_fee_params,
+					&payment_size_msat,
+					InterceptedHTLC {
+						intercept_id: InterceptId([0; 32]),
+						expected_outbound_amount_msat: 500_000_000,
+						payment_hash: PaymentHash([100; 32]),
+					},
+				)
+				.unwrap();
+			assert!(matches!(new_state, OutboundJITChannelState::PendingChannelOpen { .. }));
+			assert!(matches!(action, Some(HTLCInterceptedAction::OpenChannel(_))));
+			state = new_state;
+		}
+		// Intercepts payment B.
+		{
+			let (new_state, action) = state
+				.htlc_intercepted(
+					&opening_fee_params,
+					&payment_size_msat,
+					InterceptedHTLC {
+						intercept_id: InterceptId([1; 32]),
+						expected_outbound_amount_msat: 600_000_000,
+						payment_hash: PaymentHash([101; 32]),
+					},
+				)
+				.unwrap();
+			assert!(matches!(new_state, OutboundJITChannelState::PendingChannelOpen { .. }));
+			assert!(action.is_none());
+			state = new_state;
+		}
+		// Channel opens, becomes ready, and payment A gets forwarded.
+		{
+			let (new_state, ForwardPaymentAction(channel_id, payment)) =
+				state.channel_ready(ChannelId([200; 32])).unwrap();
+			assert_eq!(channel_id, ChannelId([200; 32]));
+			assert_eq!(payment.opening_fee_msat, 10_000_000);
+			assert_eq!(
+				payment.htlcs,
+				vec![InterceptedHTLC {
+					intercept_id: InterceptId([0; 32]),
+					expected_outbound_amount_msat: 500_000_000,
+					payment_hash: PaymentHash([100; 32]),
+				},]
+			);
+			state = new_state;
+		}
+		// Intercepts payment C.
+		{
+			let (new_state, action) = state
+				.htlc_intercepted(
+					&opening_fee_params,
+					&payment_size_msat,
+					InterceptedHTLC {
+						intercept_id: InterceptId([2; 32]),
+						expected_outbound_amount_msat: 500_000_000,
+						payment_hash: PaymentHash([102; 32]),
+					},
+				)
+				.unwrap();
+			assert!(matches!(new_state, OutboundJITChannelState::PendingPaymentForward { .. }));
+			assert!(action.is_none());
+			state = new_state;
+		}
+		// Payment A fails, and payment B is forwarded.
+		{
+			let (new_state, action) = state.htlc_handling_failed().unwrap();
+			assert!(matches!(new_state, OutboundJITChannelState::PendingPaymentForward { .. }));
+			match action {
+				Some(ForwardPaymentAction(channel_id, payment)) => {
+					assert_eq!(channel_id, ChannelId([200; 32]));
+					assert_eq!(
+						payment.htlcs,
+						vec![InterceptedHTLC {
+							intercept_id: InterceptId([1; 32]),
+							expected_outbound_amount_msat: 600_000_000,
+							payment_hash: PaymentHash([101; 32]),
+						},]
+					);
+				},
+				_ => panic!("Unexpected action when HTLC handling failed."),
+			}
+			state = new_state;
+		}
+		// Payment completes, queued payments get forwarded.
+		{
+			let (new_state, action) = state.payment_forwarded().unwrap();
+			assert!(matches!(new_state, OutboundJITChannelState::PaymentForwarded { .. }));
+			match action {
+				Some(ForwardHTLCsAction(channel_id, htlcs)) => {
+					assert_eq!(channel_id, ChannelId([200; 32]));
+					assert_eq!(
+						htlcs,
+						vec![InterceptedHTLC {
+							intercept_id: InterceptId([2; 32]),
+							expected_outbound_amount_msat: 500_000_000,
+							payment_hash: PaymentHash([102; 32]),
+						}]
+					);
+				},
+				_ => panic!("Unexpected action when forwarded payment."),
+			}
+			state = new_state;
+		}
+		// Any new HTLC gets automatically forwarded.
+		{
+			let (new_state, action) = state
+				.htlc_intercepted(
+					&opening_fee_params,
+					&payment_size_msat,
+					InterceptedHTLC {
+						intercept_id: InterceptId([3; 32]),
+						expected_outbound_amount_msat: 200_000_000,
+						payment_hash: PaymentHash([103; 32]),
+					},
+				)
+				.unwrap();
+			assert!(matches!(new_state, OutboundJITChannelState::PaymentForwarded { .. }));
+			assert!(
+				matches!(action, Some(HTLCInterceptedAction::ForwardHTLC(channel_id)) if channel_id == ChannelId([200; 32]))
+			);
+		}
 	}
 }
