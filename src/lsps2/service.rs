@@ -257,6 +257,7 @@ impl OutboundJITChannel {
 struct PeerState {
 	outbound_channels_by_intercept_scid: HashMap<u64, OutboundJITChannel>,
 	intercept_scid_by_user_channel_id: HashMap<u128, u64>,
+	intercept_scid_by_channel_id: HashMap<ChannelId, u64>,
 	pending_requests: HashMap<RequestId, LSPS2Request>,
 }
 
@@ -265,10 +266,12 @@ impl PeerState {
 		let outbound_channels_by_intercept_scid = HashMap::new();
 		let pending_requests = HashMap::new();
 		let intercept_scid_by_user_channel_id = HashMap::new();
+		let intercept_scid_by_channel_id = HashMap::new();
 		Self {
 			outbound_channels_by_intercept_scid,
 			pending_requests,
 			intercept_scid_by_user_channel_id,
+			intercept_scid_by_channel_id,
 		}
 	}
 
@@ -287,6 +290,7 @@ where
 	pending_events: Arc<EventQueue>,
 	per_peer_state: RwLock<HashMap<PublicKey, Mutex<PeerState>>>,
 	peer_by_intercept_scid: RwLock<HashMap<u64, PublicKey>>,
+	peer_by_channel_id: RwLock<HashMap<ChannelId, PublicKey>>,
 	config: LSPS2ServiceConfig,
 }
 
@@ -304,6 +308,7 @@ where
 			pending_events,
 			per_peer_state: RwLock::new(HashMap::new()),
 			peer_by_intercept_scid: RwLock::new(HashMap::new()),
+			peer_by_channel_id: RwLock::new(HashMap::new()),
 			channel_manager,
 			config,
 		}
@@ -523,6 +528,10 @@ where
 	pub fn channel_ready(
 		&self, user_channel_id: u128, channel_id: &ChannelId, counterparty_node_id: &PublicKey,
 	) -> Result<(), APIError> {
+		{
+			let mut peer_by_channel_id = self.peer_by_channel_id.write().unwrap();
+			peer_by_channel_id.insert(*channel_id, *counterparty_node_id);
+		}
 		let outer_state_lock = self.per_peer_state.read().unwrap();
 		match outer_state_lock.get(counterparty_node_id) {
 			Some(inner_state_lock) => {
@@ -530,6 +539,7 @@ where
 				if let Some(intercept_scid) =
 					peer_state.intercept_scid_by_user_channel_id.get(&user_channel_id).copied()
 				{
+					peer_state.intercept_scid_by_channel_id.insert(*channel_id, intercept_scid);
 					if let Some(jit_channel) =
 						peer_state.outbound_channels_by_intercept_scid.get_mut(&intercept_scid)
 					{
