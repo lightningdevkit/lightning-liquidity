@@ -236,13 +236,6 @@ pub struct GetOrderRequest {
 	pub order_id: OrderId,
 }
 
-/// A response to an [`GetOrderRequest`].
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct GetOrderResponse {
-	/// The response to the order request.
-	pub response: CreateOrderResponse,
-}
-
 /// An enum that captures all the valid JSON-RPC requests in the LSPS1 protocol.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LSPS1Request {
@@ -266,7 +259,7 @@ pub enum LSPS1Response {
 	/// An error response to a [`CreateOrderRequest`].
 	CreateOrderError(ResponseError),
 	/// A successful response to a [`GetOrderRequest`].
-	GetOrder(GetOrderResponse),
+	GetOrder(CreateOrderResponse),
 	/// An error response to a [`GetOrderRequest`].
 	GetOrderError(ResponseError),
 }

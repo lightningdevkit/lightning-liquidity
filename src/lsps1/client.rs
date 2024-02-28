@@ -12,8 +12,7 @@
 use super::event::LSPS1ClientEvent;
 use super::msgs::{
 	CreateOrderRequest, CreateOrderResponse, GetInfoRequest, GetInfoResponse, GetOrderRequest,
-	GetOrderResponse, LSPS1Message, LSPS1Request, LSPS1Response, OptionsSupported, OrderId,
-	OrderParams,
+	LSPS1Message, LSPS1Request, LSPS1Response, OptionsSupported, OrderId, OrderParams,
 };
 use super::utils::is_valid;
 use crate::message_queue::MessageQueue;
@@ -560,7 +559,7 @@ where
 	}
 
 	fn handle_get_order_response(
-		&self, request_id: RequestId, counterparty_node_id: &PublicKey, params: GetOrderResponse,
+		&self, request_id: RequestId, counterparty_node_id: &PublicKey, params: CreateOrderResponse,
 	) -> Result<(), LightningError> {
 		let outer_state_lock = self.per_peer_state.read().unwrap();
 		match outer_state_lock.get(&counterparty_node_id) {
