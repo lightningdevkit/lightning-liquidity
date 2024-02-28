@@ -1,7 +1,8 @@
 //! Message, request, and other primitive types used to implement LSPS1.
 
-use crate::lsps0::msgs::{LSPSMessage, RequestId, ResponseError};
-use crate::lsps0::ser::{string_amount, string_amount_option};
+use crate::lsps0::ser::{
+	string_amount, string_amount_option, LSPSMessage, RequestId, ResponseError,
+};
 
 use crate::prelude::{String, Vec};
 
@@ -249,22 +250,13 @@ pub enum LSPS1Request {
 	GetOrder(GetOrderRequest),
 }
 
-impl LSPS1Request {
-	/// Get the JSON-RPC method name for the underlying request.
-	pub fn method(&self) -> &str {
-		match self {
-			LSPS1Request::GetInfo(_) => LSPS1_GET_INFO_METHOD_NAME,
-			LSPS1Request::CreateOrder(_) => LSPS1_CREATE_ORDER_METHOD_NAME,
-			LSPS1Request::GetOrder(_) => LSPS1_GET_ORDER_METHOD_NAME,
-		}
-	}
-}
-
 /// An enum that captures all the valid JSON-RPC responses in the LSPS1 protocol.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LSPS1Response {
 	/// A successful response to a [`GetInfoRequest`].
 	GetInfo(GetInfoResponse),
+	/// An error response to a [`GetInfoRequest`].
+	GetInfoError(ResponseError),
 	/// A successful response to a [`CreateOrderRequest`].
 	CreateOrder(CreateOrderResponse),
 	/// An error response to a [`CreateOrderRequest`].

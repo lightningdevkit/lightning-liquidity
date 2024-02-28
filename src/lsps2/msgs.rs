@@ -8,8 +8,9 @@ use bitcoin::hashes::{Hash, HashEngine};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
-use crate::lsps0::msgs::{LSPSMessage, RequestId, ResponseError};
-use crate::lsps0::ser::{string_amount, string_amount_option};
+use crate::lsps0::ser::{
+	string_amount, string_amount_option, LSPSMessage, RequestId, ResponseError,
+};
 use crate::prelude::{String, Vec};
 use crate::utils;
 
@@ -164,16 +165,6 @@ pub enum LSPS2Request {
 	GetInfo(GetInfoRequest),
 	/// A request to buy a JIT channel from an LSP.
 	Buy(BuyRequest),
-}
-
-impl LSPS2Request {
-	/// Get the JSON-RPC method name for the underlying request.
-	pub fn method(&self) -> &str {
-		match self {
-			LSPS2Request::GetInfo(_) => LSPS2_GET_INFO_METHOD_NAME,
-			LSPS2Request::Buy(_) => LSPS2_BUY_METHOD_NAME,
-		}
-	}
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

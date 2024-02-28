@@ -1,7 +1,7 @@
 use core::{fmt::Write, ops::Deref};
 use lightning::sign::EntropySource;
 
-use crate::lsps0::msgs::RequestId;
+use crate::lsps0::ser::RequestId;
 use crate::prelude::String;
 
 /// Maximum transaction index that can be used in a `short_channel_id`.

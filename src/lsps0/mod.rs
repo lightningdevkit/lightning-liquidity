@@ -12,5 +12,5 @@
 pub mod client;
 pub mod event;
 pub mod msgs;
-pub(crate) mod ser;
+pub mod ser;
 pub mod service;

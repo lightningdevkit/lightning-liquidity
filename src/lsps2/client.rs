@@ -10,7 +10,7 @@
 //! Contains the main LSPS2 client object, [`LSPS2ClientHandler`].
 
 use crate::events::{Event, EventQueue};
-use crate::lsps0::msgs::{ProtocolMessageHandler, RequestId, ResponseError};
+use crate::lsps0::ser::{ProtocolMessageHandler, RequestId, ResponseError};
 use crate::lsps2::event::LSPS2ClientEvent;
 use crate::message_queue::MessageQueue;
 use crate::prelude::{HashMap, HashSet, String};

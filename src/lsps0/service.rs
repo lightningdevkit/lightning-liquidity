@@ -13,10 +13,8 @@
 //! specifcation](https://github.com/BitcoinAndLightningLayerSpecs/lsp/tree/main/LSPS0) for more
 //! information.
 
-use crate::lsps0::msgs::{
-	LSPS0Message, LSPS0Request, LSPS0Response, ListProtocolsResponse, ProtocolMessageHandler,
-	RequestId,
-};
+use crate::lsps0::msgs::{LSPS0Message, LSPS0Request, LSPS0Response, ListProtocolsResponse};
+use crate::lsps0::ser::{ProtocolMessageHandler, RequestId};
 use crate::message_queue::MessageQueue;
 use crate::prelude::Vec;
 use crate::sync::Arc;
@@ -81,7 +79,8 @@ impl ProtocolMessageHandler for LSPS0ServiceHandler {
 #[cfg(test)]
 mod tests {
 
-	use crate::lsps0::msgs::{LSPSMessage, ListProtocolsRequest};
+	use crate::lsps0::msgs::ListProtocolsRequest;
+	use crate::lsps0::ser::LSPSMessage;
 	use crate::tests::utils;
 	use alloc::string::ToString;
 	use alloc::sync::Arc;

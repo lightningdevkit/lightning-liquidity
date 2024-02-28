@@ -9,14 +9,13 @@
 
 //! Contains the main LSPS2 server-side object, [`LSPS2ServiceHandler`].
 
-use crate::events::EventQueue;
-use crate::lsps0::msgs::{ProtocolMessageHandler, RequestId};
+use crate::events::{Event, EventQueue};
+use crate::lsps0::ser::{ProtocolMessageHandler, RequestId, ResponseError};
 use crate::lsps2::event::LSPS2ServiceEvent;
 use crate::lsps2::utils::{compute_opening_fee, is_valid_opening_fee_params};
 use crate::message_queue::MessageQueue;
 use crate::prelude::{HashMap, String, ToString, Vec};
 use crate::sync::{Arc, Mutex, RwLock};
-use crate::{events::Event, lsps0::msgs::ResponseError};
 
 use lightning::ln::channelmanager::{AChannelManager, InterceptId};
 use lightning::ln::msgs::{ErrorAction, LightningError};

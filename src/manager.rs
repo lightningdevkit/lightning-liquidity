@@ -1,7 +1,10 @@
 use crate::events::{Event, EventQueue};
 use crate::lsps0::client::LSPS0ClientHandler;
-use crate::lsps0::msgs::{
-	LSPS0Message, LSPSMessage, ProtocolMessageHandler, RawLSPSMessage, LSPS_MESSAGE_TYPE_ID,
+use crate::lsps0::msgs::LSPS0Message;
+use crate::lsps0::ser::{
+	LSPSMessage, LSPSMethod, ProtocolMessageHandler, RawLSPSMessage, RequestId, ResponseError,
+	JSONRPC_INVALID_MESSAGE_ERROR_CODE, JSONRPC_INVALID_MESSAGE_ERROR_MESSAGE,
+	LSPS_MESSAGE_TYPE_ID,
 };
 use crate::lsps0::service::LSPS0ServiceHandler;
 use crate::message_queue::MessageQueue;
@@ -16,15 +19,16 @@ use crate::lsps1::service::{LSPS1ServiceConfig, LSPS1ServiceHandler};
 use crate::lsps2::client::{LSPS2ClientConfig, LSPS2ClientHandler};
 use crate::lsps2::msgs::LSPS2Message;
 use crate::lsps2::service::{LSPS2ServiceConfig, LSPS2ServiceHandler};
-use crate::prelude::{HashMap, String, Vec};
+use crate::prelude::{HashMap, ToString, Vec};
 use crate::sync::{Arc, Mutex, RwLock};
 
 use lightning::chain::{self, BestBlock, Confirm, Filter, Listen};
 use lightning::ln::channelmanager::{AChannelManager, ChainParameters};
 use lightning::ln::features::{InitFeatures, NodeFeatures};
-use lightning::ln::msgs::{ErrorAction, LightningError};
+use lightning::ln::msgs::{ErrorAction, ErrorMessage, LightningError};
 use lightning::ln::peer_handler::CustomMessageHandler;
 use lightning::ln::wire::CustomMessageReader;
+use lightning::ln::ChannelId;
 use lightning::sign::EntropySource;
 use lightning::util::logger::Level;
 use lightning::util::ser::Readable;
@@ -32,6 +36,7 @@ use lightning::util::ser::Readable;
 use bitcoin::secp256k1::PublicKey;
 
 use core::ops::Deref;
+
 const LSPS_FEATURE_BIT: usize = 729;
 
 /// A server-side configuration for [`LiquidityManager`].
@@ -88,7 +93,7 @@ where
 {
 	pending_messages: Arc<MessageQueue>,
 	pending_events: Arc<EventQueue>,
-	request_id_to_method_map: Mutex<HashMap<String, String>>,
+	request_id_to_method_map: Mutex<HashMap<RequestId, LSPSMethod>>,
 	lsps0_client_handler: LSPS0ClientHandler<ES>,
 	lsps0_service_handler: Option<LSPS0ServiceHandler>,
 	#[cfg(lsps1)]
@@ -326,7 +331,7 @@ where {
 		&self, msg: LSPSMessage, sender_node_id: &PublicKey,
 	) -> Result<(), lightning::ln::msgs::LightningError> {
 		match msg {
-			LSPSMessage::Invalid => {
+			LSPSMessage::Invalid(_error) => {
 				return Err(LightningError { err: format!("{} did not understand a message we previously sent, maybe they don't support a protocol we are trying to use?", sender_node_id), action: ErrorAction::IgnoreAndLog(Level::Error)});
 			}
 			LSPSMessage::LSPS0(msg @ LSPS0Message::Response(..)) => {
@@ -416,16 +421,24 @@ where
 	) -> Result<(), lightning::ln::msgs::LightningError> {
 		let message = {
 			let mut request_id_to_method_map = self.request_id_to_method_map.lock().unwrap();
-			LSPSMessage::from_str_with_id_map(&msg.payload, &mut request_id_to_method_map)
+			LSPSMessage::from_str_with_id_map(&msg.payload, &mut request_id_to_method_map).map_err(
+				|_| {
+					let error = ResponseError {
+						code: JSONRPC_INVALID_MESSAGE_ERROR_CODE,
+						message: JSONRPC_INVALID_MESSAGE_ERROR_MESSAGE.to_string(),
+						data: None,
+					};
+
+					self.pending_messages.enqueue(sender_node_id, LSPSMessage::Invalid(error));
+					let err = format!("Failed to deserialize invalid LSPS message.");
+					let err_msg =
+						Some(ErrorMessage { channel_id: ChannelId([0; 32]), data: err.clone() });
+					LightningError { err, action: ErrorAction::DisconnectPeer { msg: err_msg } }
+				},
+			)?
 		};
 
-		match message {
-			Ok(msg) => self.handle_lsps_message(msg, sender_node_id),
-			Err(_) => {
-				self.pending_messages.enqueue(sender_node_id, LSPSMessage::Invalid);
-				Ok(())
-			}
-		}
+		self.handle_lsps_message(message, sender_node_id)
 	}
 
 	fn get_and_clear_pending_msg(&self) -> Vec<(PublicKey, Self::CustomMessage)> {
@@ -434,8 +447,8 @@ where
 			.get_and_clear_pending_msgs()
 			.iter()
 			.map(|(public_key, lsps_message)| {
-				if let Some((request_id, method_name)) = lsps_message.get_request_id_and_method() {
-					request_id_to_method_map.insert(request_id, method_name);
+				if let Some((request_id, method)) = lsps_message.get_request_id_and_method() {
+					request_id_to_method_map.insert(request_id, method);
 				}
 				(
 					*public_key,
