@@ -67,7 +67,7 @@ impl OutboundRequestState {
 		match self {
 			OutboundRequestState::OrderCreated { order_id } => {
 				Ok(OutboundRequestState::WaitingPayment { order_id: order_id.clone() })
-			}
+			},
 			state => Err(ChannelStateError(format!("TODO. JIT Channel was in state: {:?}", state))),
 		}
 	}
@@ -275,15 +275,15 @@ where
 								channel: None,
 							}),
 						);
-					}
+					},
 
 					_ => {
 						return Err(APIError::APIMisuseError {
 							err: format!("No pending buy request for request_id: {:?}", request_id),
 						})
-					}
+					},
 				}
-			}
+			},
 			None => {
 				return Err(APIError::APIMisuseError {
 					err: format!(
@@ -291,7 +291,7 @@ where
 						counterparty_node_id
 					),
 				})
-			}
+			},
 		}
 
 		Ok(())
@@ -337,13 +337,13 @@ where
 						order_id: params.order_id,
 					},
 				));
-			}
+			},
 			None => {
 				return Err(LightningError {
 					err: format!("Received error response for a create order request from an unknown counterparty ({:?})",counterparty_node_id),
 					action: ErrorAction::IgnoreAndLog(Level::Info),
 				});
-			}
+			},
 		}
 
 		Ok(())
@@ -390,12 +390,12 @@ where
 						err: format!("Channel with order_id {} not found", order_id.0),
 					});
 				}
-			}
+			},
 			None => {
 				return Err(APIError::APIMisuseError {
 					err: format!("No existing state with counterparty {}", counterparty_node_id),
 				})
-			}
+			},
 		}
 		Ok(())
 	}
@@ -430,13 +430,13 @@ where
 			LSPS1Message::Request(request_id, request) => match request {
 				LSPS1Request::GetInfo(_) => {
 					self.handle_get_info_request(request_id, counterparty_node_id)
-				}
+				},
 				LSPS1Request::CreateOrder(params) => {
 					self.handle_create_order_request(request_id, counterparty_node_id, params)
-				}
+				},
 				LSPS1Request::GetOrder(params) => {
 					self.handle_get_order_request(request_id, counterparty_node_id, params)
-				}
+				},
 			},
 			_ => {
 				debug_assert!(
@@ -444,7 +444,7 @@ where
 					"Service handler received LSPS1 response message. This should never happen."
 				);
 				Err(LightningError { err: format!("Service handler received LSPS1 response message from node {:?}. This should never happen.", counterparty_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)})
-			}
+			},
 		}
 	}
 }

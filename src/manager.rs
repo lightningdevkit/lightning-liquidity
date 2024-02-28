@@ -394,58 +394,58 @@ where {
 		match msg {
 			LSPSMessage::Invalid(_error) => {
 				return Err(LightningError { err: format!("{} did not understand a message we previously sent, maybe they don't support a protocol we are trying to use?", sender_node_id), action: ErrorAction::IgnoreAndLog(Level::Error)});
-			}
+			},
 			LSPSMessage::LSPS0(msg @ LSPS0Message::Response(..)) => {
 				self.lsps0_client_handler.handle_message(msg, sender_node_id)?;
-			}
+			},
 			LSPSMessage::LSPS0(msg @ LSPS0Message::Request(..)) => {
 				match &self.lsps0_service_handler {
 					Some(lsps0_service_handler) => {
 						lsps0_service_handler.handle_message(msg, sender_node_id)?;
-					}
+					},
 					None => {
 						return Err(LightningError { err: format!("Received LSPS0 request message without LSPS0 service handler configured. From node = {:?}", sender_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
-					}
+					},
 				}
-			}
+			},
 			#[cfg(lsps1)]
 			LSPSMessage::LSPS1(msg @ LSPS1Message::Response(..)) => match &self.lsps1_client_handler {
 				Some(lsps1_client_handler) => {
 					lsps1_client_handler.handle_message(msg, sender_node_id)?;
-				}
+				},
 				None => {
 					return Err(LightningError { err: format!("Received LSPS1 response message without LSPS1 client handler configured. From node = {:?}", sender_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
-				}
+				},
 			},
 			#[cfg(lsps1)]
 			LSPSMessage::LSPS1(msg @ LSPS1Message::Request(..)) => match &self.lsps1_service_handler {
 				Some(lsps1_service_handler) => {
 					lsps1_service_handler.handle_message(msg, sender_node_id)?;
-				}
+				},
 				None => {
 					return Err(LightningError { err: format!("Received LSPS1 request message without LSPS1 service handler configured. From node = {:?}", sender_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
-				}
+				},
 			},
 			LSPSMessage::LSPS2(msg @ LSPS2Message::Response(..)) => {
 				match &self.lsps2_client_handler {
 					Some(lsps2_client_handler) => {
 						lsps2_client_handler.handle_message(msg, sender_node_id)?;
-					}
+					},
 					None => {
 						return Err(LightningError { err: format!("Received LSPS2 response message without LSPS2 client handler configured. From node = {:?}", sender_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
-					}
+					},
 				}
-			}
+			},
 			LSPSMessage::LSPS2(msg @ LSPS2Message::Request(..)) => {
 				match &self.lsps2_service_handler {
 					Some(lsps2_service_handler) => {
 						lsps2_service_handler.handle_message(msg, sender_node_id)?;
-					}
+					},
 					None => {
 						return Err(LightningError { err: format!("Received LSPS2 request message without LSPS2 service handler configured. From node = {:?}", sender_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
-					}
+					},
 				}
-			}
+			},
 		}
 		Ok(())
 	}

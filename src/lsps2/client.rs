@@ -214,7 +214,7 @@ where
 						opening_fee_params_menu: result.opening_fee_params_menu,
 					},
 				));
-			}
+			},
 			None => {
 				return Err(LightningError {
 					err: format!(
@@ -223,7 +223,7 @@ where
 					),
 					action: ErrorAction::IgnoreAndLog(Level::Info),
 				})
-			}
+			},
 		}
 
 		Ok(())
@@ -248,10 +248,10 @@ where
 				}
 
 				Ok(())
-			}
+			},
 			None => {
 				return Err(LightningError { err: format!("Received error response for a get_info request from an unknown counterparty ({:?})",counterparty_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
-			}
+			},
 		}
 	}
 
@@ -291,7 +291,7 @@ where
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					});
 				}
-			}
+			},
 			None => {
 				return Err(LightningError {
 					err: format!(
@@ -300,7 +300,7 @@ where
 					),
 					action: ErrorAction::IgnoreAndLog(Level::Info),
 				});
-			}
+			},
 		}
 		Ok(())
 	}
@@ -319,10 +319,10 @@ where
 				})?;
 
 				Ok(())
-			}
+			},
 			None => {
 				return Err(LightningError { err: format!("Received error response for a buy request from an unknown counterparty ({:?})", counterparty_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
-			}
+			},
 		}
 	}
 }
@@ -341,16 +341,16 @@ where
 			LSPS2Message::Response(request_id, response) => match response {
 				LSPS2Response::GetInfo(result) => {
 					self.handle_get_info_response(request_id, counterparty_node_id, result)
-				}
+				},
 				LSPS2Response::GetInfoError(error) => {
 					self.handle_get_info_error(request_id, counterparty_node_id, error)
-				}
+				},
 				LSPS2Response::Buy(result) => {
 					self.handle_buy_response(request_id, counterparty_node_id, result)
-				}
+				},
 				LSPS2Response::BuyError(error) => {
 					self.handle_buy_error(request_id, counterparty_node_id, error)
-				}
+				},
 			},
 			_ => {
 				debug_assert!(
@@ -358,7 +358,7 @@ where
 					"Client handler received LSPS2 request message. This should never happen."
 				);
 				Err(LightningError { err: format!("Client handler received LSPS2 request message from node {:?}. This should never happen.", counterparty_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)})
-			}
+			},
 		}
 	}
 }
