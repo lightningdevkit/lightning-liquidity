@@ -481,22 +481,23 @@ where
 		&self, msg: Self::CustomMessage, sender_node_id: &PublicKey,
 	) -> Result<(), lightning::ln::msgs::LightningError> {
 		let message = {
-			let mut request_id_to_method_map = self.request_id_to_method_map.lock().unwrap();
-			LSPSMessage::from_str_with_id_map(&msg.payload, &mut request_id_to_method_map).map_err(
-				|_| {
-					let error = ResponseError {
-						code: JSONRPC_INVALID_MESSAGE_ERROR_CODE,
-						message: JSONRPC_INVALID_MESSAGE_ERROR_MESSAGE.to_string(),
-						data: None,
-					};
+			{
+				let mut request_id_to_method_map = self.request_id_to_method_map.lock().unwrap();
+				LSPSMessage::from_str_with_id_map(&msg.payload, &mut request_id_to_method_map)
+			}
+			.map_err(|_| {
+				let error = ResponseError {
+					code: JSONRPC_INVALID_MESSAGE_ERROR_CODE,
+					message: JSONRPC_INVALID_MESSAGE_ERROR_MESSAGE.to_string(),
+					data: None,
+				};
 
-					self.pending_messages.enqueue(sender_node_id, LSPSMessage::Invalid(error));
-					let err = format!("Failed to deserialize invalid LSPS message.");
-					let err_msg =
-						Some(ErrorMessage { channel_id: ChannelId([0; 32]), data: err.clone() });
-					LightningError { err, action: ErrorAction::DisconnectPeer { msg: err_msg } }
-				},
-			)?
+				self.pending_messages.enqueue(sender_node_id, LSPSMessage::Invalid(error));
+				let err = format!("Failed to deserialize invalid LSPS message.");
+				let err_msg =
+					Some(ErrorMessage { channel_id: ChannelId([0; 32]), data: err.clone() });
+				LightningError { err, action: ErrorAction::DisconnectPeer { msg: err_msg } }
+			})?
 		};
 
 		self.handle_lsps_message(message, sender_node_id)
