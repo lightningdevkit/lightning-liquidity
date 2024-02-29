@@ -504,18 +504,26 @@ where
 	}
 
 	fn get_and_clear_pending_msg(&self) -> Vec<(PublicKey, Self::CustomMessage)> {
-		let mut request_id_to_method_map = self.request_id_to_method_map.lock().unwrap();
-		self.pending_messages
-			.get_and_clear_pending_msgs()
+		let pending_messages = self.pending_messages.get_and_clear_pending_msgs();
+
+		let mut request_ids_and_methods = pending_messages
 			.iter()
-			.map(|(public_key, lsps_message)| {
-				if let Some((request_id, method)) = lsps_message.get_request_id_and_method() {
-					request_id_to_method_map.insert(request_id, method);
-				}
-				(
-					*public_key,
-					RawLSPSMessage { payload: serde_json::to_string(&lsps_message).unwrap() },
-				)
+			.filter_map(|(_, msg)| msg.get_request_id_and_method())
+			.peekable();
+
+		if request_ids_and_methods.peek().is_some() {
+			let mut request_id_to_method_map_lock = self.request_id_to_method_map.lock().unwrap();
+			for (request_id, method) in request_ids_and_methods {
+				request_id_to_method_map_lock.insert(request_id, method);
+			}
+		}
+
+		pending_messages
+			.into_iter()
+			.filter_map(|(public_key, msg)| {
+				serde_json::to_string(&msg)
+					.ok()
+					.and_then(|payload| Some((public_key, RawLSPSMessage { payload })))
 			})
 			.collect()
 	}
