@@ -15,11 +15,11 @@ use crate::lsps1::msgs::{
 use crate::lsps2::msgs::{
 	LSPS2Message, LSPS2Request, LSPS2Response, LSPS2_BUY_METHOD_NAME, LSPS2_GET_INFO_METHOD_NAME,
 };
-use crate::prelude::{HashMap, String, ToString, Vec};
+use crate::prelude::{HashMap, String, ToString};
 
-use lightning::impl_writeable_msg;
 use lightning::ln::msgs::LightningError;
 use lightning::ln::wire;
+use lightning::util::ser::WithoutLength;
 
 use bitcoin::secp256k1::PublicKey;
 
@@ -160,7 +160,23 @@ pub struct RawLSPSMessage {
 	pub payload: String,
 }
 
-impl_writeable_msg!(RawLSPSMessage, { payload }, {});
+// We encode `RawLSPSMessage`'s payload without a length prefix as LSPS0 expects it to be the
+// remainder of the object.
+impl lightning::util::ser::Writeable for RawLSPSMessage {
+	fn write<W: lightning::util::ser::Writer>(
+		&self, w: &mut W,
+	) -> Result<(), lightning::io::Error> {
+		WithoutLength(&self.payload).write(w)?;
+		Ok(())
+	}
+}
+
+impl lightning::util::ser::Readable for RawLSPSMessage {
+	fn read<R: lightning::io::Read>(r: &mut R) -> Result<Self, lightning::ln::msgs::DecodeError> {
+		let payload_without_length = WithoutLength::read(r)?;
+		Ok(Self { payload: payload_without_length.0 })
+	}
+}
 
 impl wire::Type for RawLSPSMessage {
 	fn type_id(&self) -> u16 {
