@@ -129,14 +129,9 @@ where
 			peer_state_lock.pending_get_info_requests.insert(request_id.clone());
 		}
 
-		self.pending_messages.enqueue(
-			&counterparty_node_id,
-			LSPS2Message::Request(
-				request_id.clone(),
-				LSPS2Request::GetInfo(GetInfoRequest { token }),
-			)
-			.into(),
-		);
+		let request = LSPS2Request::GetInfo(GetInfoRequest { token });
+		let msg = LSPS2Message::Request(request_id.clone(), request).into();
+		self.pending_messages.enqueue(&counterparty_node_id, msg);
 
 		request_id
 	}
@@ -163,28 +158,30 @@ where
 		&self, counterparty_node_id: PublicKey, payment_size_msat: Option<u64>,
 		opening_fee_params: OpeningFeeParams,
 	) -> Result<RequestId, APIError> {
-		let mut outer_state_lock = self.per_peer_state.write().unwrap();
-		let inner_state_lock =
-			outer_state_lock.entry(counterparty_node_id).or_insert(Mutex::new(PeerState::new()));
-		let mut peer_state_lock = inner_state_lock.lock().unwrap();
-
 		let request_id = crate::utils::generate_request_id(&self.entropy_source);
 
-		let jit_channel = InboundJITChannel::new(payment_size_msat);
-		if peer_state_lock.pending_buy_requests.insert(request_id.clone(), jit_channel).is_some() {
-			return Err(APIError::APIMisuseError {
-				err: format!("Failed due to duplicate request_id. This should never happen!"),
-			});
+		{
+			let mut outer_state_lock = self.per_peer_state.write().unwrap();
+			let inner_state_lock = outer_state_lock
+				.entry(counterparty_node_id)
+				.or_insert(Mutex::new(PeerState::new()));
+			let mut peer_state_lock = inner_state_lock.lock().unwrap();
+
+			let jit_channel = InboundJITChannel::new(payment_size_msat);
+			if peer_state_lock
+				.pending_buy_requests
+				.insert(request_id.clone(), jit_channel)
+				.is_some()
+			{
+				return Err(APIError::APIMisuseError {
+					err: format!("Failed due to duplicate request_id. This should never happen!"),
+				});
+			}
 		}
 
-		self.pending_messages.enqueue(
-			&counterparty_node_id,
-			LSPS2Message::Request(
-				request_id.clone(),
-				LSPS2Request::Buy(BuyRequest { opening_fee_params, payment_size_msat }),
-			)
-			.into(),
-		);
+		let request = LSPS2Request::Buy(BuyRequest { opening_fee_params, payment_size_msat });
+		let msg = LSPS2Message::Request(request_id.clone(), request).into();
+		self.pending_messages.enqueue(&counterparty_node_id, msg);
 
 		Ok(request_id)
 	}
