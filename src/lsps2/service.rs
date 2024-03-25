@@ -508,7 +508,8 @@ where
 							message: "an unrecognized or stale token was provided".to_string(),
 							data: None,
 						});
-						self.enqueue_response(counterparty_node_id, request_id, response);
+						let msg = LSPS2Message::Response(request_id, response).into();
+						self.pending_messages.enqueue(counterparty_node_id, msg);
 						Ok(())
 					},
 					_ => Err(APIError::APIMisuseError {
@@ -550,7 +551,8 @@ where
 								})
 								.collect(),
 						});
-						self.enqueue_response(counterparty_node_id, request_id, response);
+						let msg = LSPS2Message::Response(request_id, response).into();
+						self.pending_messages.enqueue(counterparty_node_id, msg);
 						Ok(())
 					},
 					_ => Err(APIError::APIMisuseError {
@@ -601,15 +603,13 @@ where
 							.insert(user_channel_id, intercept_scid);
 						peer_state.insert_outbound_channel(intercept_scid, outbound_jit_channel);
 
-						self.enqueue_response(
-							counterparty_node_id,
-							request_id,
-							LSPS2Response::Buy(BuyResponse {
-								intercept_scid: intercept_scid.into(),
-								lsp_cltv_expiry_delta: cltv_expiry_delta,
-								client_trusts_lsp,
-							}),
-						);
+						let response = LSPS2Response::Buy(BuyResponse {
+							intercept_scid: intercept_scid.into(),
+							lsp_cltv_expiry_delta: cltv_expiry_delta,
+							client_trusts_lsp,
+						});
+						let msg = LSPS2Message::Response(request_id, response).into();
+						self.pending_messages.enqueue(counterparty_node_id, msg);
 
 						Ok(())
 					},
@@ -927,13 +927,6 @@ where
 		Ok(())
 	}
 
-	fn enqueue_response(
-		&self, counterparty_node_id: &PublicKey, request_id: RequestId, response: LSPS2Response,
-	) {
-		self.pending_messages
-			.enqueue(counterparty_node_id, LSPS2Message::Response(request_id, response).into());
-	}
-
 	fn enqueue_event(&self, event: Event) {
 		self.pending_events.enqueue(event);
 	}
@@ -962,16 +955,14 @@ where
 	) -> Result<(), LightningError> {
 		if let Some(payment_size_msat) = params.payment_size_msat {
 			if payment_size_msat < params.opening_fee_params.min_payment_size_msat {
-				self.enqueue_response(
-					counterparty_node_id,
-					request_id,
-					LSPS2Response::BuyError(ResponseError {
-						code: LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_SMALL_ERROR_CODE,
-						message: "payment size is below our minimum supported payment size"
-							.to_string(),
-						data: None,
-					}),
-				);
+				let response = LSPS2Response::BuyError(ResponseError {
+					code: LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_SMALL_ERROR_CODE,
+					message: "payment size is below our minimum supported payment size".to_string(),
+					data: None,
+				});
+				let msg = LSPS2Message::Response(request_id, response).into();
+				self.pending_messages.enqueue(counterparty_node_id, msg);
+
 				return Err(LightningError {
 					err: "payment size is below our minimum supported payment size".to_string(),
 					action: ErrorAction::IgnoreAndLog(Level::Info),
@@ -979,16 +970,13 @@ where
 			}
 
 			if payment_size_msat > params.opening_fee_params.max_payment_size_msat {
-				self.enqueue_response(
-					counterparty_node_id,
-					request_id,
-					LSPS2Response::BuyError(ResponseError {
-						code: LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_LARGE_ERROR_CODE,
-						message: "payment size is above our maximum supported payment size"
-							.to_string(),
-						data: None,
-					}),
-				);
+				let response = LSPS2Response::BuyError(ResponseError {
+					code: LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_LARGE_ERROR_CODE,
+					message: "payment size is above our maximum supported payment size".to_string(),
+					data: None,
+				});
+				let msg = LSPS2Message::Response(request_id, response).into();
+				self.pending_messages.enqueue(counterparty_node_id, msg);
 				return Err(LightningError {
 					err: "payment size is above our maximum supported payment size".to_string(),
 					action: ErrorAction::IgnoreAndLog(Level::Info),
@@ -1002,16 +990,14 @@ where
 			) {
 				Some(opening_fee) => {
 					if opening_fee >= payment_size_msat {
-						self.enqueue_response(
-							counterparty_node_id,
-							request_id,
-							LSPS2Response::BuyError(ResponseError {
-								code: LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_SMALL_ERROR_CODE,
-								message: "payment size is too small to cover the opening fee"
-									.to_string(),
-								data: None,
-							}),
-						);
+						let response = LSPS2Response::BuyError(ResponseError {
+							code: LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_SMALL_ERROR_CODE,
+							message: "payment size is too small to cover the opening fee"
+								.to_string(),
+							data: None,
+						});
+						let msg = LSPS2Message::Response(request_id, response).into();
+						self.pending_messages.enqueue(counterparty_node_id, msg);
 						return Err(LightningError {
 							err: "payment size is too small to cover the opening fee".to_string(),
 							action: ErrorAction::IgnoreAndLog(Level::Info),
@@ -1019,15 +1005,13 @@ where
 					}
 				},
 				None => {
-					self.enqueue_response(
-						counterparty_node_id,
-						request_id,
-						LSPS2Response::BuyError(ResponseError {
-							code: LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_LARGE_ERROR_CODE,
-							message: "overflow error when calculating opening_fee".to_string(),
-							data: None,
-						}),
-					);
+					let response = LSPS2Response::BuyError(ResponseError {
+						code: LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_LARGE_ERROR_CODE,
+						message: "overflow error when calculating opening_fee".to_string(),
+						data: None,
+					});
+					let msg = LSPS2Message::Response(request_id, response).into();
+					self.pending_messages.enqueue(counterparty_node_id, msg);
 					return Err(LightningError {
 						err: "overflow error when calculating opening_fee".to_string(),
 						action: ErrorAction::IgnoreAndLog(Level::Info),
@@ -1039,15 +1023,13 @@ where
 		// TODO: if payment_size_msat is specified, make sure our node has sufficient incoming liquidity from public network to receive it.
 
 		if !is_valid_opening_fee_params(&params.opening_fee_params, &self.config.promise_secret) {
-			self.enqueue_response(
-				counterparty_node_id,
-				request_id,
-				LSPS2Response::BuyError(ResponseError {
-					code: LSPS2_BUY_REQUEST_INVALID_OPENING_FEE_PARAMS_ERROR_CODE,
-					message: "valid_until is already past OR the promise did not match the provided parameters".to_string(),
-					data: None,
-				}),
-			);
+			let response = LSPS2Response::BuyError(ResponseError {
+				code: LSPS2_BUY_REQUEST_INVALID_OPENING_FEE_PARAMS_ERROR_CODE,
+				message: "valid_until is already past OR the promise did not match the provided parameters".to_string(),
+				data: None,
+			});
+			let msg = LSPS2Message::Response(request_id, response).into();
+			self.pending_messages.enqueue(counterparty_node_id, msg);
 			return Err(LightningError {
 				err: "invalid opening fee parameters were supplied by client".to_string(),
 				action: ErrorAction::IgnoreAndLog(Level::Info),
