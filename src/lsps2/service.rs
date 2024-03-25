@@ -656,16 +656,14 @@ where
 						};
 						match jit_channel.htlc_intercepted(htlc) {
 							Ok(Some(HTLCInterceptedAction::OpenChannel(open_channel_params))) => {
-								self.enqueue_event(Event::LSPS2Service(
-									LSPS2ServiceEvent::OpenChannel {
-										their_network_key: counterparty_node_id.clone(),
-										amt_to_forward_msat: open_channel_params
-											.amt_to_forward_msat,
-										opening_fee_msat: open_channel_params.opening_fee_msat,
-										user_channel_id: jit_channel.user_channel_id,
-										intercept_scid,
-									},
-								));
+								let event = Event::LSPS2Service(LSPS2ServiceEvent::OpenChannel {
+									their_network_key: counterparty_node_id.clone(),
+									amt_to_forward_msat: open_channel_params.amt_to_forward_msat,
+									opening_fee_msat: open_channel_params.opening_fee_msat,
+									user_channel_id: jit_channel.user_channel_id,
+									intercept_scid,
+								});
+								self.pending_events.enqueue(event);
 							},
 							Ok(Some(HTLCInterceptedAction::ForwardHTLC(channel_id))) => {
 								self.channel_manager.get_cm().forward_intercepted_htlc(
@@ -927,10 +925,6 @@ where
 		Ok(())
 	}
 
-	fn enqueue_event(&self, event: Event) {
-		self.pending_events.enqueue(event);
-	}
-
 	fn handle_get_info_request(
 		&self, request_id: RequestId, counterparty_node_id: &PublicKey, params: GetInfoRequest,
 	) -> Result<(), LightningError> {
@@ -942,11 +936,12 @@ where
 			.pending_requests
 			.insert(request_id.clone(), LSPS2Request::GetInfo(params.clone()));
 
-		self.enqueue_event(Event::LSPS2Service(LSPS2ServiceEvent::GetInfo {
+		let event = Event::LSPS2Service(LSPS2ServiceEvent::GetInfo {
 			request_id,
 			counterparty_node_id: *counterparty_node_id,
 			token: params.token,
-		}));
+		});
+		self.pending_events.enqueue(event);
 		Ok(())
 	}
 
@@ -1044,12 +1039,13 @@ where
 			.pending_requests
 			.insert(request_id.clone(), LSPS2Request::Buy(params.clone()));
 
-		self.enqueue_event(Event::LSPS2Service(LSPS2ServiceEvent::BuyRequest {
+		let event = Event::LSPS2Service(LSPS2ServiceEvent::BuyRequest {
 			request_id,
 			counterparty_node_id: *counterparty_node_id,
 			opening_fee_params: params.opening_fee_params,
 			payment_size_msat: params.payment_size_msat,
-		}));
+		});
+		self.pending_events.enqueue(event);
 
 		Ok(())
 	}
