@@ -170,7 +170,7 @@ where
 	fn handle_get_info_request(
 		&self, request_id: RequestId, counterparty_node_id: &PublicKey,
 	) -> Result<(), LightningError> {
-		let response = GetInfoResponse {
+		let response = LSPS1Response::GetInfo(GetInfoResponse {
 			website: self.config.website.clone().unwrap().to_string(),
 			options: self
 				.config
@@ -181,9 +181,10 @@ where
 					action: ErrorAction::IgnoreAndLog(Level::Info),
 				})
 				.unwrap(),
-		};
+		});
 
-		self.enqueue_response(counterparty_node_id, request_id, LSPS1Response::GetInfo(response));
+		let msg = LSPS1Message::Response(request_id, response).into();
+		self.pending_messages.enqueue(counterparty_node_id, msg);
 		Ok(())
 	}
 
@@ -191,18 +192,16 @@ where
 		&self, request_id: RequestId, counterparty_node_id: &PublicKey, params: CreateOrderRequest,
 	) -> Result<(), LightningError> {
 		if !is_valid(&params.order, &self.config.options_supported.as_ref().unwrap()) {
-			self.enqueue_response(
-				counterparty_node_id,
-				request_id,
-				LSPS1Response::CreateOrderError(ResponseError {
-					code: LSPS1_CREATE_ORDER_REQUEST_ORDER_MISMATCH_ERROR_CODE,
-					message: format!("Order does not match options supported by LSP server"),
-					data: Some(format!(
-						"Supported options are {:?}",
-						&self.config.options_supported.as_ref().unwrap()
-					)),
-				}),
-			);
+			let response = LSPS1Response::CreateOrderError(ResponseError {
+				code: LSPS1_CREATE_ORDER_REQUEST_ORDER_MISMATCH_ERROR_CODE,
+				message: format!("Order does not match options supported by LSP server"),
+				data: Some(format!(
+					"Supported options are {:?}",
+					&self.config.options_supported.as_ref().unwrap()
+				)),
+			});
+			let msg = LSPS1Message::Response(request_id, response).into();
+			self.pending_messages.enqueue(counterparty_node_id, msg);
 			return Err(LightningError {
 				err: format!(
 					"Client order does not match any supported options: {:?}",
@@ -262,19 +261,17 @@ where
 
 						peer_state_lock.insert_outbound_channel(order_id.clone(), channel);
 
-						self.enqueue_response(
-							counterparty_node_id,
-							request_id,
-							LSPS1Response::CreateOrder(CreateOrderResponse {
-								order: params.order,
-								order_id,
-								order_state: OrderState::Created,
-								created_at,
-								expires_at,
-								payment,
-								channel: None,
-							}),
-						);
+						let response = LSPS1Response::CreateOrder(CreateOrderResponse {
+							order: params.order,
+							order_id,
+							order_state: OrderState::Created,
+							created_at,
+							expires_at,
+							payment,
+							channel: None,
+						});
+						let msg = LSPS1Message::Response(request_id, response).into();
+						self.pending_messages.enqueue(counterparty_node_id, msg);
 					},
 
 					_ => {
@@ -372,19 +369,17 @@ where
 				{
 					let config = &outbound_channel.config;
 
-					self.enqueue_response(
-						&counterparty_node_id,
-						request_id,
-						LSPS1Response::GetOrder(CreateOrderResponse {
-							order_id,
-							order: config.order.clone(),
-							order_state,
-							created_at: config.created_at,
-							expires_at: config.expires_at,
-							payment: config.payment.clone(),
-							channel,
-						}),
-					)
+					let response = LSPS1Response::GetOrder(CreateOrderResponse {
+						order_id,
+						order: config.order.clone(),
+						order_state,
+						created_at: config.created_at,
+						expires_at: config.expires_at,
+						payment: config.payment.clone(),
+						channel,
+					});
+					let msg = LSPS1Message::Response(request_id, response).into();
+					self.pending_messages.enqueue(&counterparty_node_id, msg);
 				} else {
 					return Err(APIError::APIMisuseError {
 						err: format!("Channel with order_id {} not found", order_id.0),
@@ -398,13 +393,6 @@ where
 			},
 		}
 		Ok(())
-	}
-
-	fn enqueue_response(
-		&self, counterparty_node_id: &PublicKey, request_id: RequestId, response: LSPS1Response,
-	) {
-		self.pending_messages
-			.enqueue(counterparty_node_id, LSPS1Message::Response(request_id, response).into());
 	}
 
 	fn generate_order_id(&self) -> OrderId {
