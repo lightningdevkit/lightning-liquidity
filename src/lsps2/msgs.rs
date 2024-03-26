@@ -243,6 +243,8 @@ mod tests {
 		assert_eq!(opening_fee_params.valid_until, valid_until);
 		assert_eq!(opening_fee_params.min_lifetime, min_lifetime);
 		assert_eq!(opening_fee_params.max_client_to_self_delay, max_client_to_self_delay);
+		assert_eq!(opening_fee_params.min_payment_size_msat, min_payment_size_msat);
+		assert_eq!(opening_fee_params.max_payment_size_msat, max_payment_size_msat);
 
 		assert!(is_valid_opening_fee_params(&opening_fee_params, &promise_secret));
 	}
