@@ -495,34 +495,51 @@ where
 	pub fn invalid_token_provided(
 		&self, counterparty_node_id: &PublicKey, request_id: RequestId,
 	) -> Result<(), APIError> {
-		let outer_state_lock = self.per_peer_state.read().unwrap();
+		let (result, response) = {
+			let outer_state_lock = self.per_peer_state.read().unwrap();
 
-		match outer_state_lock.get(counterparty_node_id) {
-			Some(inner_state_lock) => {
-				let mut peer_state = inner_state_lock.lock().unwrap();
+			match outer_state_lock.get(counterparty_node_id) {
+				Some(inner_state_lock) => {
+					let mut peer_state = inner_state_lock.lock().unwrap();
 
-				match peer_state.pending_requests.remove(&request_id) {
-					Some(LSPS2Request::GetInfo(_)) => {
-						let response = LSPS2Response::GetInfoError(ResponseError {
-							code: LSPS2_GET_INFO_REQUEST_UNRECOGNIZED_OR_STALE_TOKEN_ERROR_CODE,
-							message: "an unrecognized or stale token was provided".to_string(),
-							data: None,
-						});
-						self.enqueue_response(counterparty_node_id, request_id, response);
-						Ok(())
-					},
-					_ => Err(APIError::APIMisuseError {
+					match peer_state.pending_requests.remove(&request_id) {
+						Some(LSPS2Request::GetInfo(_)) => {
+							let response = LSPS2Response::GetInfoError(ResponseError {
+								code: LSPS2_GET_INFO_REQUEST_UNRECOGNIZED_OR_STALE_TOKEN_ERROR_CODE,
+								message: "an unrecognized or stale token was provided".to_string(),
+								data: None,
+							});
+							(Ok(()), Some(response))
+						},
+						_ => (
+							Err(APIError::APIMisuseError {
+								err: format!(
+									"No pending get_info request for request_id: {:?}",
+									request_id
+								),
+							}),
+							None,
+						),
+					}
+				},
+				None => (
+					Err(APIError::APIMisuseError {
 						err: format!(
-							"No pending get_info request for request_id: {:?}",
-							request_id
+							"No state for the counterparty exists: {:?}",
+							counterparty_node_id
 						),
 					}),
-				}
-			},
-			None => Err(APIError::APIMisuseError {
-				err: format!("No state for the counterparty exists: {:?}", counterparty_node_id),
-			}),
+					None,
+				),
+			}
+		};
+
+		if let Some(response) = response {
+			let msg = LSPS2Message::Response(request_id, response).into();
+			self.pending_messages.enqueue(counterparty_node_id, msg);
 		}
+
+		result
 	}
 
 	/// Used by LSP to provide fee parameters to a client requesting a JIT Channel.
@@ -534,37 +551,54 @@ where
 		&self, counterparty_node_id: &PublicKey, request_id: RequestId,
 		opening_fee_params_menu: Vec<RawOpeningFeeParams>,
 	) -> Result<(), APIError> {
-		let outer_state_lock = self.per_peer_state.read().unwrap();
+		let (result, response) = {
+			let outer_state_lock = self.per_peer_state.read().unwrap();
 
-		match outer_state_lock.get(counterparty_node_id) {
-			Some(inner_state_lock) => {
-				let mut peer_state = inner_state_lock.lock().unwrap();
+			match outer_state_lock.get(counterparty_node_id) {
+				Some(inner_state_lock) => {
+					let mut peer_state = inner_state_lock.lock().unwrap();
 
-				match peer_state.pending_requests.remove(&request_id) {
-					Some(LSPS2Request::GetInfo(_)) => {
-						let response = LSPS2Response::GetInfo(GetInfoResponse {
-							opening_fee_params_menu: opening_fee_params_menu
-								.into_iter()
-								.map(|param| {
-									param.into_opening_fee_params(&self.config.promise_secret)
-								})
-								.collect(),
-						});
-						self.enqueue_response(counterparty_node_id, request_id, response);
-						Ok(())
-					},
-					_ => Err(APIError::APIMisuseError {
+					match peer_state.pending_requests.remove(&request_id) {
+						Some(LSPS2Request::GetInfo(_)) => {
+							let response = LSPS2Response::GetInfo(GetInfoResponse {
+								opening_fee_params_menu: opening_fee_params_menu
+									.into_iter()
+									.map(|param| {
+										param.into_opening_fee_params(&self.config.promise_secret)
+									})
+									.collect(),
+							});
+							(Ok(()), Some(response))
+						},
+						_ => (
+							Err(APIError::APIMisuseError {
+								err: format!(
+									"No pending get_info request for request_id: {:?}",
+									request_id
+								),
+							}),
+							None,
+						),
+					}
+				},
+				None => (
+					Err(APIError::APIMisuseError {
 						err: format!(
-							"No pending get_info request for request_id: {:?}",
-							request_id
+							"No state for the counterparty exists: {:?}",
+							counterparty_node_id
 						),
 					}),
-				}
-			},
-			None => Err(APIError::APIMisuseError {
-				err: format!("No state for the counterparty exists: {:?}", counterparty_node_id),
-			}),
+					None,
+				),
+			}
+		};
+
+		if let Some(response) = response {
+			let msg = LSPS2Message::Response(request_id, response).into();
+			self.pending_messages.enqueue(counterparty_node_id, msg);
 		}
+
+		result
 	}
 
 	/// Used by LSP to provide client with the intercept scid and cltv_expiry_delta to use in their invoice.
@@ -576,52 +610,70 @@ where
 		&self, counterparty_node_id: &PublicKey, request_id: RequestId, intercept_scid: u64,
 		cltv_expiry_delta: u32, client_trusts_lsp: bool, user_channel_id: u128,
 	) -> Result<(), APIError> {
-		let outer_state_lock = self.per_peer_state.read().unwrap();
+		let (result, response) = {
+			let outer_state_lock = self.per_peer_state.read().unwrap();
 
-		match outer_state_lock.get(counterparty_node_id) {
-			Some(inner_state_lock) => {
-				let mut peer_state = inner_state_lock.lock().unwrap();
+			match outer_state_lock.get(counterparty_node_id) {
+				Some(inner_state_lock) => {
+					let mut peer_state = inner_state_lock.lock().unwrap();
 
-				match peer_state.pending_requests.remove(&request_id) {
-					Some(LSPS2Request::Buy(buy_request)) => {
-						{
-							let mut peer_by_intercept_scid =
-								self.peer_by_intercept_scid.write().unwrap();
-							peer_by_intercept_scid.insert(intercept_scid, *counterparty_node_id);
-						}
+					match peer_state.pending_requests.remove(&request_id) {
+						Some(LSPS2Request::Buy(buy_request)) => {
+							{
+								let mut peer_by_intercept_scid =
+									self.peer_by_intercept_scid.write().unwrap();
+								peer_by_intercept_scid
+									.insert(intercept_scid, *counterparty_node_id);
+							}
 
-						let outbound_jit_channel = OutboundJITChannel::new(
-							buy_request.payment_size_msat,
-							buy_request.opening_fee_params,
-							user_channel_id,
-						);
+							let outbound_jit_channel = OutboundJITChannel::new(
+								buy_request.payment_size_msat,
+								buy_request.opening_fee_params,
+								user_channel_id,
+							);
 
-						peer_state
-							.intercept_scid_by_user_channel_id
-							.insert(user_channel_id, intercept_scid);
-						peer_state.insert_outbound_channel(intercept_scid, outbound_jit_channel);
+							peer_state
+								.intercept_scid_by_user_channel_id
+								.insert(user_channel_id, intercept_scid);
+							peer_state
+								.insert_outbound_channel(intercept_scid, outbound_jit_channel);
 
-						self.enqueue_response(
-							counterparty_node_id,
-							request_id,
-							LSPS2Response::Buy(BuyResponse {
+							let response = LSPS2Response::Buy(BuyResponse {
 								intercept_scid: intercept_scid.into(),
 								lsp_cltv_expiry_delta: cltv_expiry_delta,
 								client_trusts_lsp,
+							});
+							(Ok(()), Some(response))
+						},
+						_ => (
+							Err(APIError::APIMisuseError {
+								err: format!(
+									"No pending buy request for request_id: {:?}",
+									request_id
+								),
 							}),
-						);
-
-						Ok(())
-					},
-					_ => Err(APIError::APIMisuseError {
-						err: format!("No pending buy request for request_id: {:?}", request_id),
+							None,
+						),
+					}
+				},
+				None => (
+					Err(APIError::APIMisuseError {
+						err: format!(
+							"No state for the counterparty exists: {:?}",
+							counterparty_node_id
+						),
 					}),
-				}
-			},
-			None => Err(APIError::APIMisuseError {
-				err: format!("No state for the counterparty exists: {:?}", counterparty_node_id),
-			}),
+					None,
+				),
+			}
+		};
+
+		if let Some(response) = response {
+			let msg = LSPS2Message::Response(request_id, response).into();
+			self.pending_messages.enqueue(counterparty_node_id, msg);
 		}
+
+		result
 	}
 
 	/// Forward [`Event::HTLCIntercepted`] event parameters into this function.
@@ -656,16 +708,14 @@ where
 						};
 						match jit_channel.htlc_intercepted(htlc) {
 							Ok(Some(HTLCInterceptedAction::OpenChannel(open_channel_params))) => {
-								self.enqueue_event(Event::LSPS2Service(
-									LSPS2ServiceEvent::OpenChannel {
-										their_network_key: counterparty_node_id.clone(),
-										amt_to_forward_msat: open_channel_params
-											.amt_to_forward_msat,
-										opening_fee_msat: open_channel_params.opening_fee_msat,
-										user_channel_id: jit_channel.user_channel_id,
-										intercept_scid,
-									},
-								));
+								let event = Event::LSPS2Service(LSPS2ServiceEvent::OpenChannel {
+									their_network_key: counterparty_node_id.clone(),
+									amt_to_forward_msat: open_channel_params.amt_to_forward_msat,
+									opening_fee_msat: open_channel_params.opening_fee_msat,
+									user_channel_id: jit_channel.user_channel_id,
+									intercept_scid,
+								});
+								self.pending_events.enqueue(event);
 							},
 							Ok(Some(HTLCInterceptedAction::ForwardHTLC(channel_id))) => {
 								self.channel_manager.get_cm().forward_intercepted_htlc(
@@ -927,17 +977,6 @@ where
 		Ok(())
 	}
 
-	fn enqueue_response(
-		&self, counterparty_node_id: &PublicKey, request_id: RequestId, response: LSPS2Response,
-	) {
-		self.pending_messages
-			.enqueue(counterparty_node_id, LSPS2Message::Response(request_id, response).into());
-	}
-
-	fn enqueue_event(&self, event: Event) {
-		self.pending_events.enqueue(event);
-	}
-
 	fn handle_get_info_request(
 		&self, request_id: RequestId, counterparty_node_id: &PublicKey, params: GetInfoRequest,
 	) -> Result<(), LightningError> {
@@ -949,11 +988,12 @@ where
 			.pending_requests
 			.insert(request_id.clone(), LSPS2Request::GetInfo(params.clone()));
 
-		self.enqueue_event(Event::LSPS2Service(LSPS2ServiceEvent::GetInfo {
+		let event = Event::LSPS2Service(LSPS2ServiceEvent::GetInfo {
 			request_id,
 			counterparty_node_id: *counterparty_node_id,
 			token: params.token,
-		}));
+		});
+		self.pending_events.enqueue(event);
 		Ok(())
 	}
 
@@ -962,16 +1002,14 @@ where
 	) -> Result<(), LightningError> {
 		if let Some(payment_size_msat) = params.payment_size_msat {
 			if payment_size_msat < params.opening_fee_params.min_payment_size_msat {
-				self.enqueue_response(
-					counterparty_node_id,
-					request_id,
-					LSPS2Response::BuyError(ResponseError {
-						code: LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_SMALL_ERROR_CODE,
-						message: "payment size is below our minimum supported payment size"
-							.to_string(),
-						data: None,
-					}),
-				);
+				let response = LSPS2Response::BuyError(ResponseError {
+					code: LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_SMALL_ERROR_CODE,
+					message: "payment size is below our minimum supported payment size".to_string(),
+					data: None,
+				});
+				let msg = LSPS2Message::Response(request_id, response).into();
+				self.pending_messages.enqueue(counterparty_node_id, msg);
+
 				return Err(LightningError {
 					err: "payment size is below our minimum supported payment size".to_string(),
 					action: ErrorAction::IgnoreAndLog(Level::Info),
@@ -979,16 +1017,13 @@ where
 			}
 
 			if payment_size_msat > params.opening_fee_params.max_payment_size_msat {
-				self.enqueue_response(
-					counterparty_node_id,
-					request_id,
-					LSPS2Response::BuyError(ResponseError {
-						code: LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_LARGE_ERROR_CODE,
-						message: "payment size is above our maximum supported payment size"
-							.to_string(),
-						data: None,
-					}),
-				);
+				let response = LSPS2Response::BuyError(ResponseError {
+					code: LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_LARGE_ERROR_CODE,
+					message: "payment size is above our maximum supported payment size".to_string(),
+					data: None,
+				});
+				let msg = LSPS2Message::Response(request_id, response).into();
+				self.pending_messages.enqueue(counterparty_node_id, msg);
 				return Err(LightningError {
 					err: "payment size is above our maximum supported payment size".to_string(),
 					action: ErrorAction::IgnoreAndLog(Level::Info),
@@ -1002,16 +1037,14 @@ where
 			) {
 				Some(opening_fee) => {
 					if opening_fee >= payment_size_msat {
-						self.enqueue_response(
-							counterparty_node_id,
-							request_id,
-							LSPS2Response::BuyError(ResponseError {
-								code: LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_SMALL_ERROR_CODE,
-								message: "payment size is too small to cover the opening fee"
-									.to_string(),
-								data: None,
-							}),
-						);
+						let response = LSPS2Response::BuyError(ResponseError {
+							code: LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_SMALL_ERROR_CODE,
+							message: "payment size is too small to cover the opening fee"
+								.to_string(),
+							data: None,
+						});
+						let msg = LSPS2Message::Response(request_id, response).into();
+						self.pending_messages.enqueue(counterparty_node_id, msg);
 						return Err(LightningError {
 							err: "payment size is too small to cover the opening fee".to_string(),
 							action: ErrorAction::IgnoreAndLog(Level::Info),
@@ -1019,15 +1052,13 @@ where
 					}
 				},
 				None => {
-					self.enqueue_response(
-						counterparty_node_id,
-						request_id,
-						LSPS2Response::BuyError(ResponseError {
-							code: LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_LARGE_ERROR_CODE,
-							message: "overflow error when calculating opening_fee".to_string(),
-							data: None,
-						}),
-					);
+					let response = LSPS2Response::BuyError(ResponseError {
+						code: LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_LARGE_ERROR_CODE,
+						message: "overflow error when calculating opening_fee".to_string(),
+						data: None,
+					});
+					let msg = LSPS2Message::Response(request_id, response).into();
+					self.pending_messages.enqueue(counterparty_node_id, msg);
 					return Err(LightningError {
 						err: "overflow error when calculating opening_fee".to_string(),
 						action: ErrorAction::IgnoreAndLog(Level::Info),
@@ -1039,35 +1070,37 @@ where
 		// TODO: if payment_size_msat is specified, make sure our node has sufficient incoming liquidity from public network to receive it.
 
 		if !is_valid_opening_fee_params(&params.opening_fee_params, &self.config.promise_secret) {
-			self.enqueue_response(
-				counterparty_node_id,
-				request_id,
-				LSPS2Response::BuyError(ResponseError {
-					code: LSPS2_BUY_REQUEST_INVALID_OPENING_FEE_PARAMS_ERROR_CODE,
-					message: "valid_until is already past OR the promise did not match the provided parameters".to_string(),
-					data: None,
-				}),
-			);
+			let response = LSPS2Response::BuyError(ResponseError {
+				code: LSPS2_BUY_REQUEST_INVALID_OPENING_FEE_PARAMS_ERROR_CODE,
+				message: "valid_until is already past OR the promise did not match the provided parameters".to_string(),
+				data: None,
+			});
+			let msg = LSPS2Message::Response(request_id, response).into();
+			self.pending_messages.enqueue(counterparty_node_id, msg);
 			return Err(LightningError {
 				err: "invalid opening fee parameters were supplied by client".to_string(),
 				action: ErrorAction::IgnoreAndLog(Level::Info),
 			});
 		}
 
-		let mut outer_state_lock = self.per_peer_state.write().unwrap();
-		let inner_state_lock =
-			outer_state_lock.entry(*counterparty_node_id).or_insert(Mutex::new(PeerState::new()));
-		let mut peer_state_lock = inner_state_lock.lock().unwrap();
-		peer_state_lock
-			.pending_requests
-			.insert(request_id.clone(), LSPS2Request::Buy(params.clone()));
+		{
+			let mut outer_state_lock = self.per_peer_state.write().unwrap();
+			let inner_state_lock = outer_state_lock
+				.entry(*counterparty_node_id)
+				.or_insert(Mutex::new(PeerState::new()));
+			let mut peer_state_lock = inner_state_lock.lock().unwrap();
+			peer_state_lock
+				.pending_requests
+				.insert(request_id.clone(), LSPS2Request::Buy(params.clone()));
+		}
 
-		self.enqueue_event(Event::LSPS2Service(LSPS2ServiceEvent::BuyRequest {
+		let event = Event::LSPS2Service(LSPS2ServiceEvent::BuyRequest {
 			request_id,
 			counterparty_node_id: *counterparty_node_id,
 			opening_fee_params: params.opening_fee_params,
 			payment_size_msat: params.payment_size_msat,
-		}));
+		});
+		self.pending_events.enqueue(event);
 
 		Ok(())
 	}
