@@ -639,7 +639,7 @@ where
 								.insert_outbound_channel(intercept_scid, outbound_jit_channel);
 
 							let response = LSPS2Response::Buy(BuyResponse {
-								intercept_scid: intercept_scid.into(),
+								jit_channel_scid: intercept_scid.into(),
 								lsp_cltv_expiry_delta: cltv_expiry_delta,
 								client_trusts_lsp,
 							});

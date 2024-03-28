@@ -21,9 +21,7 @@ pub(crate) const LSPS1_CREATE_ORDER_METHOD_NAME: &str = "lsps1.create_order";
 pub(crate) const LSPS1_GET_ORDER_METHOD_NAME: &str = "lsps1.get_order";
 
 pub(crate) const LSPS1_CREATE_ORDER_REQUEST_INVALID_PARAMS_ERROR_CODE: i32 = -32602;
-pub(crate) const LSPS1_CREATE_ORDER_REQUEST_ORDER_MISMATCH_ERROR_CODE: i32 = 1000;
-pub(crate) const LSPS1_CREATE_ORDER_REQUEST_CLIENT_REJECTED_ERROR_CODE: i32 = 1001;
-pub(crate) const LSPS1_CREATE_ORDER_REQUEST_INVALID_TOKEN_ERROR_CODE: i32 = 2;
+pub(crate) const LSPS1_CREATE_ORDER_REQUEST_ORDER_MISMATCH_ERROR_CODE: i32 = 100;
 
 /// The identifier of an order.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Hash)]
