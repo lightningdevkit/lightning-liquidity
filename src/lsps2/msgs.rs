@@ -375,4 +375,56 @@ mod tests {
 		let json_str = r#"{"opening_fee_params":{"max_client_to_self_delay":128,"max_payment_size_msat":"100000000","min_fee_msat":"100","min_lifetime":144,"min_payment_size_msat":"1","promise":"1134a5c51e3ba2e8f4259610d5e12c1bf4c50ddcd3f8af563e0a00d1fff41dea","proportional":21,"valid_until":"2023-05-20T08:30:45Z"},"payment_size_msat":null}"#;
 		assert_eq!(buy_request_variable, serde_json::from_str(json_str).unwrap());
 	}
+
+	#[test]
+	fn parse_spec_test_vectors() {
+		// Here, we simply assert that we're able to parse all examples given in LSPS2.
+		let json_str = r#"{
+			"opening_fee_params_menu": [
+			{
+				"min_fee_msat": "546000",
+				"proportional": 1200,
+				"valid_until": "2023-02-23T08:47:30.511Z",
+				"min_lifetime": 1008,
+				"max_client_to_self_delay": 2016,
+				"min_payment_size_msat": "1000",
+				"max_payment_size_msat": "1000000",
+				"promise": "abcdefghijklmnopqrstuvwxyz"
+			},
+			{
+				"min_fee_msat": "1092000",
+				"proportional": 2400,
+				"valid_until": "2023-02-27T21:23:57.984Z",
+				"min_lifetime": 1008,
+				"max_client_to_self_delay": 2016,
+				"min_payment_size_msat": "1000",
+				"max_payment_size_msat": "1000000",
+				"promise": "abcdefghijklmnopqrstuvwxyz"
+			}
+			]
+		}"#;
+		let _get_info_response: GetInfoResponse = serde_json::from_str(json_str).unwrap();
+
+		let json_str = r#"{
+			"opening_fee_params": {
+				"min_fee_msat": "546000",
+				"proportional": 1200,
+				"valid_until": "2023-02-23T08:47:30.511Z",
+				"min_lifetime": 1008,
+				"max_client_to_self_delay": 2016,
+				"min_payment_size_msat": "1000",
+				"max_payment_size_msat": "1000000",
+				"promise": "abcdefghijklmnopqrstuvwxyz"
+			},
+			"payment_size_msat": "42000"
+		}"#;
+		let _buy_request: BuyRequest = serde_json::from_str(json_str).unwrap();
+
+		let json_str = r#"{
+			"jit_channel_scid": "29451x4815x1",
+			"lsp_cltv_expiry_delta" : 144,
+			"client_trusts_lsp": false
+		}"#;
+		let _buy_response: BuyResponse = serde_json::from_str(json_str).unwrap();
+	}
 }
