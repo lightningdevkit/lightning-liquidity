@@ -17,11 +17,11 @@ use crate::utils;
 pub(crate) const LSPS2_GET_INFO_METHOD_NAME: &str = "lsps2.get_info";
 pub(crate) const LSPS2_BUY_METHOD_NAME: &str = "lsps2.buy";
 
-pub(crate) const LSPS2_GET_INFO_REQUEST_UNRECOGNIZED_OR_STALE_TOKEN_ERROR_CODE: i32 = 2;
+pub(crate) const LSPS2_GET_INFO_REQUEST_UNRECOGNIZED_OR_STALE_TOKEN_ERROR_CODE: i32 = 200;
 
-pub(crate) const LSPS2_BUY_REQUEST_INVALID_OPENING_FEE_PARAMS_ERROR_CODE: i32 = 2;
-pub(crate) const LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_SMALL_ERROR_CODE: i32 = 3;
-pub(crate) const LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_LARGE_ERROR_CODE: i32 = 4;
+pub(crate) const LSPS2_BUY_REQUEST_INVALID_OPENING_FEE_PARAMS_ERROR_CODE: i32 = 201;
+pub(crate) const LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_SMALL_ERROR_CODE: i32 = 202;
+pub(crate) const LSPS2_BUY_REQUEST_PAYMENT_SIZE_TOO_LARGE_ERROR_CODE: i32 = 203;
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 /// A request made to an LSP to learn their current channel fees and parameters.
