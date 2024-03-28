@@ -42,6 +42,8 @@ pub(crate) const JSONRPC_ERROR_FIELD_KEY: &str = "error";
 pub(crate) const JSONRPC_INVALID_MESSAGE_ERROR_CODE: i32 = -32700;
 pub(crate) const JSONRPC_INVALID_MESSAGE_ERROR_MESSAGE: &str = "parse error";
 
+pub(crate) const _LSPS0_CLIENT_REJECTED_ERROR_CODE: i32 = 001;
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum LSPSMethod {
 	LSPS0ListProtocols,
