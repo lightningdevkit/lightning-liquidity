@@ -150,7 +150,7 @@ impl InterceptScid {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct BuyResponse {
 	/// The intercept short channel id used by LSP to identify need to open channel.
-	pub intercept_scid: InterceptScid,
+	pub jit_channel_scid: InterceptScid,
 	/// The locktime expiry delta the lsp requires.
 	pub lsp_cltv_expiry_delta: u32,
 	/// A flag that indicates who is trusting who.

@@ -269,7 +269,7 @@ where
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					})?;
 
-				if let Ok(intercept_scid) = result.intercept_scid.to_scid() {
+				if let Ok(intercept_scid) = result.jit_channel_scid.to_scid() {
 					self.pending_events.enqueue(Event::LSPS2Client(
 						LSPS2ClientEvent::InvoiceParametersReady {
 							request_id,
@@ -283,7 +283,7 @@ where
 					return Err(LightningError {
 						err: format!(
 							"Received buy response with an invalid intercept scid {:?}",
-							result.intercept_scid
+							result.jit_channel_scid
 						),
 						action: ErrorAction::IgnoreAndLog(Level::Info),
 					});
