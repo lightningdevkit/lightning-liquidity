@@ -49,8 +49,8 @@ impl PaymentQueue {
 		position.map(|position| self.payments.remove(position))
 	}
 
-	pub(crate) fn clear(&mut self) -> Vec<InterceptedHTLC> {
-		self.payments.drain(..).map(|(_k, v)| v).flatten().collect()
+	pub(crate) fn clear(&mut self) -> Vec<(PaymentHash, Vec<InterceptedHTLC>)> {
+		self.payments.drain(..).collect()
 	}
 }
 
@@ -109,11 +109,14 @@ mod tests {
 		);
 		assert_eq!(
 			payment_queue.clear(),
-			vec![InterceptedHTLC {
-				intercept_id: InterceptId([1; 32]),
-				expected_outbound_amount_msat: 300_000_000,
-				payment_hash: PaymentHash([101; 32]),
-			}]
+			vec![(
+				PaymentHash([101; 32]),
+				vec![InterceptedHTLC {
+					intercept_id: InterceptId([1; 32]),
+					expected_outbound_amount_msat: 300_000_000,
+					payment_hash: PaymentHash([101; 32]),
+				}]
+			)]
 		);
 	}
 }
