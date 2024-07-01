@@ -21,6 +21,10 @@ no-std = ["hashbrown", "lightning/no-std", "lightning-invoice/no-std", "bitcoin/
 [dependencies]
 lightning = { version = "0.0.123", default-features = false, features = ["max_level_trace"] }
 lightning-invoice = { version = "0.31.0", default-features = false, features = ["serde"] }
+
+#lightning = { path = "../rust-lightning/lightning", default-features = false, features = ["max_level_trace"] }
+#lightning-invoice = { path = "../rust-lightning/lightning-invoice", default-features = false, features = ["serde"] }
+
 bitcoin = { version = "0.30.2", default-features = false, features = ["serde"] }
 hashbrown = { version = "0.8", optional = true }
 core2 = { version = "0.3.0", optional = true, default-features = false }
@@ -33,5 +37,9 @@ serde_json = "1.0"
 lightning = { version = "0.0.123", default-features = false, features = ["max_level_trace", "_test_utils"] }
 lightning-persister = { version = "0.0.123", default-features = false }
 lightning-background-processor = { version = "0.0.123", default-features = false, features = ["std"] }
+
+# lightning = { path = "../rust-lightning/lightning", default-features = false, features = ["max_level_trace", "_test_utils"] }
+# lightning-persister = { path = "../rust-lightning/lightning-persister", default-features = false }
+# lightning-background-processor = { path = "../rust-lightning/lightning-background-processor", default-features = false, features = ["std"] }
 proptest = "1.0.0"
 tokio = { version = "1.35", default-features = false, features = [ "rt-multi-thread", "time", "sync", "macros" ] }
