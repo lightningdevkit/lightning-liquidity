@@ -44,14 +44,8 @@ pub struct OptionsSupported {
 	pub min_required_channel_confirmations: u16,
 	/// The smallest number of blocks in which the LSP can confirm the funding transaction.
 	pub min_funding_confirms_within_blocks: u16,
-	/// The minimum number of block confirmations before the LSP accepts an on-chain payment as confirmed.
-	pub min_onchain_payment_confirmations: Option<u16>,
 	/// Indicates if the LSP supports zero reserve.
 	pub supports_zero_channel_reserve: bool,
-	/// Indicates the minimum amount of satoshi that is required for the LSP to accept a payment
-	/// on-chain.
-	#[serde(with = "string_amount_option")]
-	pub min_onchain_payment_size_sat: Option<u64>,
 	/// The maximum number of blocks a channel can be leased for.
 	pub max_channel_expiry_blocks: u32,
 	/// The minimum number of satoshi that the client MUST request.
@@ -78,6 +72,7 @@ pub struct OptionsSupported {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct GetInfoResponse {
 	/// All options supported by the LSP.
+	#[serde(flatten)]
 	pub options: OptionsSupported,
 }
 
@@ -128,8 +123,6 @@ pub struct CreateOrderResponse {
 	pub order: OrderParams,
 	/// The datetime when the order was created
 	pub created_at: chrono::DateTime<Utc>,
-	/// The datetime when the order expires.
-	pub expires_at: chrono::DateTime<Utc>,
 	/// The current state of the order.
 	pub order_state: OrderState,
 	/// Contains details about how to pay for the order.
@@ -153,19 +146,45 @@ pub enum OrderState {
 /// Details regarding how to pay for an order.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PaymentInfo {
+	/// A Lightning payment using BOLT 11.
+	pub bolt11: Option<Bolt11PaymentInfo>,
+	/// An onchain payment.
+	pub onchain: Option<OnchainPaymentInfo>,
+}
+
+/// A Lightning payment using BOLT 11.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct Bolt11PaymentInfo {
 	/// Indicates the current state of the payment.
-	pub state: PaymentState,
+	pub state: Bolt11PaymentState,
+	/// The datetime when the payment option expires.
+	pub expires_at: chrono::DateTime<Utc>,
 	/// The total fee the LSP will charge to open this channel in satoshi.
 	#[serde(with = "string_amount")]
 	pub fee_total_sat: u64,
-	/// What the client needs to pay in total to open the requested channel.
+	/// The amount the client needs to pay to have the requested channel openend.
 	#[serde(with = "string_amount")]
 	pub order_total_sat: u64,
 	/// A BOLT11 invoice the client can pay to have to channel opened.
-	pub bolt11_invoice: Bolt11Invoice,
+	pub invoice: Bolt11Invoice,
+}
+
+/// An onchain payment.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct OnchainPaymentInfo {
+	/// Indicates the current state of the payment.
+	pub state: OnchainPaymentState,
+	/// The datetime when the payment option expires.
+	pub expires_at: chrono::DateTime<Utc>,
+	/// The total fee the LSP will charge to open this channel in satoshi.
+	#[serde(with = "string_amount")]
+	pub fee_total_sat: u64,
+	/// The amount the client needs to pay to have the requested channel openend.
+	#[serde(with = "string_amount")]
+	pub order_total_sat: u64,
 	/// An on-chain address the client can send [`Self::order_total_sat`] to to have the channel
 	/// opened.
-	pub onchain_address: Address<NetworkUnchecked>,
+	pub address: Address<NetworkUnchecked>,
 	/// The minimum number of block confirmations that are required for the on-chain payment to be
 	/// considered confirmed.
 	pub min_onchain_payment_confirmations: Option<u16>,
@@ -173,18 +192,30 @@ pub struct PaymentInfo {
 	/// confirmed without a confirmation.
 	#[serde(with = "u32_fee_rate")]
 	pub min_fee_for_0conf: FeeRate,
-	/// Details regarding a detected on-chain payment.
-	pub onchain_payment: Option<OnchainPayment>,
 }
 
-/// The state of an [`PaymentInfo`].
+/// The state of a BOLT 11 payment.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum PaymentState {
+pub enum Bolt11PaymentState {
 	/// A payment is expected.
 	ExpectPayment,
 	/// A Lighting payment has arrived, but the preimage has not been released yet.
 	Hold,
+	/// A sufficient payment has been received.
+	Paid,
+	/// The payment has been refunded.
+	Refunded,
+	/// The payment has been cancelled.
+	Cancelled,
+}
+
+/// The state of an onchain payment.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum OnchainPaymentState {
+	/// A payment is expected.
+	ExpectPayment,
 	/// A sufficient payment has been received.
 	Paid,
 	/// The payment has been refunded.
@@ -288,9 +319,7 @@ mod tests {
 	fn options_supported_serialization() {
 		let min_required_channel_confirmations = 0;
 		let min_funding_confirms_within_blocks = 6;
-		let min_onchain_payment_confirmations = Some(6);
 		let supports_zero_channel_reserve = true;
-		let min_onchain_payment_size_sat = Some(100_000);
 		let max_channel_expiry_blocks = 144;
 		let min_initial_client_balance_sat = 10_000_000;
 		let max_initial_client_balance_sat = 100_000_000;
@@ -302,9 +331,7 @@ mod tests {
 		let options_supported = OptionsSupported {
 			min_required_channel_confirmations,
 			min_funding_confirms_within_blocks,
-			min_onchain_payment_confirmations,
 			supports_zero_channel_reserve,
-			min_onchain_payment_size_sat,
 			max_channel_expiry_blocks,
 			min_initial_client_balance_sat,
 			max_initial_client_balance_sat,
@@ -314,7 +341,7 @@ mod tests {
 			max_channel_balance_sat,
 		};
 
-		let json_str = r#"{"max_channel_balance_sat":"100000000","max_channel_expiry_blocks":144,"max_initial_client_balance_sat":"100000000","max_initial_lsp_balance_sat":"100000000","min_channel_balance_sat":"100000","min_funding_confirms_within_blocks":6,"min_initial_client_balance_sat":"10000000","min_initial_lsp_balance_sat":"100000","min_onchain_payment_confirmations":6,"min_onchain_payment_size_sat":"100000","min_required_channel_confirmations":0,"supports_zero_channel_reserve":true}"#;
+		let json_str = r#"{"max_channel_balance_sat":"100000000","max_channel_expiry_blocks":144,"max_initial_client_balance_sat":"100000000","max_initial_lsp_balance_sat":"100000000","min_channel_balance_sat":"100000","min_funding_confirms_within_blocks":6,"min_initial_client_balance_sat":"10000000","min_initial_lsp_balance_sat":"100000","min_required_channel_confirmations":0,"supports_zero_channel_reserve":true}"#;
 
 		assert_eq!(json_str, serde_json::json!(options_supported).to_string());
 		assert_eq!(options_supported, serde_json::from_str(json_str).unwrap());
@@ -327,20 +354,16 @@ mod tests {
 		let _get_info_request: GetInfoRequest = serde_json::from_str(json_str).unwrap();
 
 		let json_str = r#"{
-			"options": {
-				"min_required_channel_confirmations": 0,
-				"min_funding_confirms_within_blocks" : 6,
-				"min_onchain_payment_confirmations": null,
-				"supports_zero_channel_reserve": true,
-				"min_onchain_payment_size_sat": null,
-				"max_channel_expiry_blocks": 20160,
-				"min_initial_client_balance_sat": "20000",
-				"max_initial_client_balance_sat": "100000000",
-				"min_initial_lsp_balance_sat": "0",
-				"max_initial_lsp_balance_sat": "100000000",
-				"min_channel_balance_sat": "50000",
-				"max_channel_balance_sat": "100000000"
-			}
+			"min_required_channel_confirmations": 0,
+			"min_funding_confirms_within_blocks" : 6,
+			"supports_zero_channel_reserve": true,
+			"max_channel_expiry_blocks": 20160,
+			"min_initial_client_balance_sat": "20000",
+			"max_initial_client_balance_sat": "100000000",
+			"min_initial_lsp_balance_sat": "0",
+			"max_initial_lsp_balance_sat": "100000000",
+			"min_channel_balance_sat": "50000",
+			"max_channel_balance_sat": "100000000"
 		}"#;
 		let _get_info_response: GetInfoResponse = serde_json::from_str(json_str).unwrap();
 
@@ -357,6 +380,46 @@ mod tests {
 		let _create_order_request: CreateOrderRequest = serde_json::from_str(json_str).unwrap();
 
 		let json_str = r#"{
+			"state" : "EXPECT_PAYMENT",
+			"expires_at": "2025-01-01T00:00:00Z",
+			"fee_total_sat": "8888",
+			"order_total_sat": "200888",
+			"invoice": "lnbc252u1p3aht9ysp580g4633gd2x9lc5al0wd8wx0mpn9748jeyz46kqjrpxn52uhfpjqpp5qgf67tcqmuqehzgjm8mzya90h73deafvr4m5705l5u5l4r05l8cqdpud3h8ymm4w3jhytnpwpczqmt0de6xsmre2pkxzm3qydmkzdjrdev9s7zhgfaqxqyjw5qcqpjrzjqt6xptnd85lpqnu2lefq4cx070v5cdwzh2xlvmdgnu7gqp4zvkus5zapryqqx9qqqyqqqqqqqqqqqcsq9q9qyysgqen77vu8xqjelum24hgjpgfdgfgx4q0nehhalcmuggt32japhjuksq9jv6eksjfnppm4hrzsgyxt8y8xacxut9qv3fpyetz8t7tsymygq8yzn05"
+		}"#;
+		let _bolt11_payment: Bolt11PaymentInfo = serde_json::from_str(json_str).unwrap();
+
+		let json_str = r#"{
+			"state": "EXPECT_PAYMENT",
+			"expires_at": "2025-01-01T00:00:00Z",
+			"fee_total_sat": "9999",
+			"order_total_sat": "200999",
+			"address": "bc1p5uvtaxzkjwvey2tfy49k5vtqfpjmrgm09cvs88ezyy8h2zv7jhas9tu4yr",
+			"min_onchain_payment_confirmations": 1,
+			"min_fee_for_0conf": 253
+		}"#;
+		let _onchain_payment: OnchainPaymentInfo = serde_json::from_str(json_str).unwrap();
+
+		let json_str = r#"{
+			"bolt11": {
+				"state" : "EXPECT_PAYMENT",
+				"expires_at": "2025-01-01T00:00:00Z",
+				"fee_total_sat": "8888",
+				"order_total_sat": "200888",
+				"invoice": "lnbc252u1p3aht9ysp580g4633gd2x9lc5al0wd8wx0mpn9748jeyz46kqjrpxn52uhfpjqpp5qgf67tcqmuqehzgjm8mzya90h73deafvr4m5705l5u5l4r05l8cqdpud3h8ymm4w3jhytnpwpczqmt0de6xsmre2pkxzm3qydmkzdjrdev9s7zhgfaqxqyjw5qcqpjrzjqt6xptnd85lpqnu2lefq4cx070v5cdwzh2xlvmdgnu7gqp4zvkus5zapryqqx9qqqyqqqqqqqqqqqcsq9q9qyysgqen77vu8xqjelum24hgjpgfdgfgx4q0nehhalcmuggt32japhjuksq9jv6eksjfnppm4hrzsgyxt8y8xacxut9qv3fpyetz8t7tsymygq8yzn05"
+			},
+			"onchain": {
+				"state": "EXPECT_PAYMENT",
+				"expires_at": "2025-01-01T00:00:00Z",
+				"fee_total_sat": "9999",
+				"order_total_sat": "200999",
+				"address": "bc1p5uvtaxzkjwvey2tfy49k5vtqfpjmrgm09cvs88ezyy8h2zv7jhas9tu4yr",
+				"min_onchain_payment_confirmations": 1,
+				"min_fee_for_0conf": 253
+			}
+		}"#;
+		let _payment: PaymentInfo = serde_json::from_str(json_str).unwrap();
+
+		let json_str = r#"{
 			"order_id": "bb4b5d0a-8334-49d8-9463-90a6d413af7c",
 			"lsp_balance_sat": "5000000",
 			"client_balance_sat": "2000000",
@@ -365,18 +428,25 @@ mod tests {
 			"channel_expiry_blocks": 12,
 			"token": "",
 			"created_at": "2012-04-23T18:25:43.511Z",
-			"expires_at": "2015-01-25T19:29:44.612Z",
 			"announce_channel": true,
 			"order_state": "CREATED",
 			"payment": {
-				"state": "EXPECT_PAYMENT",
-				"fee_total_sat": "8888",
-				"order_total_sat": "2008888",
-				"bolt11_invoice": "lnbc252u1p3aht9ysp580g4633gd2x9lc5al0wd8wx0mpn9748jeyz46kqjrpxn52uhfpjqpp5qgf67tcqmuqehzgjm8mzya90h73deafvr4m5705l5u5l4r05l8cqdpud3h8ymm4w3jhytnpwpczqmt0de6xsmre2pkxzm3qydmkzdjrdev9s7zhgfaqxqyjw5qcqpjrzjqt6xptnd85lpqnu2lefq4cx070v5cdwzh2xlvmdgnu7gqp4zvkus5zapryqqx9qqqyqqqqqqqqqqqcsq9q9qyysgqen77vu8xqjelum24hgjpgfdgfgx4q0nehhalcmuggt32japhjuksq9jv6eksjfnppm4hrzsgyxt8y8xacxut9qv3fpyetz8t7tsymygq8yzn05",
-				"onchain_address": "bc1p5uvtaxzkjwvey2tfy49k5vtqfpjmrgm09cvs88ezyy8h2zv7jhas9tu4yr",
-				"min_onchain_payment_confirmations": 0,
-				"min_fee_for_0conf": 253,
-				"onchain_payment": null
+				"bolt11": {
+					"state": "EXPECT_PAYMENT",
+					"expires_at": "2015-01-25T19:29:44.612Z",
+					"fee_total_sat": "8888",
+					"order_total_sat": "2008888",
+					"invoice" : "lnbc252u1p3aht9ysp580g4633gd2x9lc5al0wd8wx0mpn9748jeyz46kqjrpxn52uhfpjqpp5qgf67tcqmuqehzgjm8mzya90h73deafvr4m5705l5u5l4r05l8cqdpud3h8ymm4w3jhytnpwpczqmt0de6xsmre2pkxzm3qydmkzdjrdev9s7zhgfaqxqyjw5qcqpjrzjqt6xptnd85lpqnu2lefq4cx070v5cdwzh2xlvmdgnu7gqp4zvkus5zapryqqx9qqqyqqqqqqqqqqqcsq9q9qyysgqen77vu8xqjelum24hgjpgfdgfgx4q0nehhalcmuggt32japhjuksq9jv6eksjfnppm4hrzsgyxt8y8xacxut9qv3fpyetz8t7tsymygq8yzn05"
+				},
+				"onchain": {
+					"state": "EXPECT_PAYMENT",
+					"expires_at": "2015-01-25T19:29:44.612Z",
+					"fee_total_sat": "9999",
+					"order_total_sat": "2009999",
+					"address": "bc1qvmsy0f3yyes6z9jvddk8xqwznndmdwapvrc0xrmhd3vqj5rhdrrq6hz49h",
+					"min_fee_for_0conf": 253,
+					"min_onchain_payment_confirmations": 0
+				}
 			},
 			"channel": null
 		}"#;
@@ -386,22 +456,6 @@ mod tests {
 			"order_id": "bb4b5d0a-8334-49d8-9463-90a6d413af7c"
 		}"#;
 		let _get_order_request: GetOrderRequest = serde_json::from_str(json_str).unwrap();
-
-		let json_str = r#"{
-			"state": "EXPECT_PAYMENT",
-			"fee_total_sat": "8888",
-			"order_total_sat": "2008888",
-			"bolt11_invoice": "lnbc252u1p3aht9ysp580g4633gd2x9lc5al0wd8wx0mpn9748jeyz46kqjrpxn52uhfpjqpp5qgf67tcqmuqehzgjm8mzya90h73deafvr4m5705l5u5l4r05l8cqdpud3h8ymm4w3jhytnpwpczqmt0de6xsmre2pkxzm3qydmkzdjrdev9s7zhgfaqxqyjw5qcqpjrzjqt6xptnd85lpqnu2lefq4cx070v5cdwzh2xlvmdgnu7gqp4zvkus5zapryqqx9qqqyqqqqqqqqqqqcsq9q9qyysgqen77vu8xqjelum24hgjpgfdgfgx4q0nehhalcmuggt32japhjuksq9jv6eksjfnppm4hrzsgyxt8y8xacxut9qv3fpyetz8t7tsymygq8yzn05",
-			"onchain_address": "bc1p5uvtaxzkjwvey2tfy49k5vtqfpjmrgm09cvs88ezyy8h2zv7jhas9tu4yr",
-			"min_onchain_payment_confirmations": 1,
-			"min_fee_for_0conf": 253,
-			"onchain_payment": {
-				"outpoint": "0301e0480b374b32851a9462db29dc19fe830a7f7d7a88b81612b9d42099c0ae:1",
-				"sat": "1200",
-				"confirmed": false
-			}
-		}"#;
-		let _payment: PaymentInfo = serde_json::from_str(json_str).unwrap();
 
 		let json_str = r#"{
 			"funded_at": "2012-04-23T18:25:43.511Z",

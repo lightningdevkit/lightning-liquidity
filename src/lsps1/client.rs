@@ -447,10 +447,12 @@ where
 					return Err(e);
 				}
 
-				let total_fees = response.payment.fee_total_sat + response.order.client_balance_sat;
+				// FIXME: Account for the individual payment types properly.
+				let total_fees = response.payment.bolt11.as_ref().map_or(0, |p| p.fee_total_sat)
+					+ response.order.client_balance_sat;
 				let max_channel_fees_msat = self.config.max_channel_fees_msat.unwrap_or(u64::MAX);
 
-				if total_fees == response.payment.order_total_sat
+				if total_fees == response.payment.bolt11.as_ref().map_or(0, |p| p.order_total_sat)
 					&& total_fees < max_channel_fees_msat
 				{
 					self.pending_events.enqueue(Event::LSPS1Client(

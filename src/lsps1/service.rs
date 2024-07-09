@@ -74,7 +74,6 @@ impl OutboundRequestState {
 struct OutboundLSPS1Config {
 	order: OrderParams,
 	created_at: chrono::DateTime<Utc>,
-	expires_at: chrono::DateTime<Utc>,
 	payment: PaymentInfo,
 }
 
@@ -85,12 +84,12 @@ struct OutboundCRChannel {
 
 impl OutboundCRChannel {
 	fn new(
-		order: OrderParams, created_at: chrono::DateTime<Utc>, expires_at: chrono::DateTime<Utc>,
-		order_id: OrderId, payment: PaymentInfo,
+		order: OrderParams, created_at: chrono::DateTime<Utc>, order_id: OrderId,
+		payment: PaymentInfo,
 	) -> Self {
 		Self {
 			state: OutboundRequestState::OrderCreated { order_id },
-			config: OutboundLSPS1Config { order, created_at, expires_at, payment },
+			config: OutboundLSPS1Config { order, created_at, payment },
 		}
 	}
 	fn awaiting_payment(&mut self) -> Result<(), LightningError> {
@@ -239,7 +238,7 @@ where
 	/// [`LSPS1ServiceEvent::RequestForPaymentDetails`]: crate::lsps1::event::LSPS1ServiceEvent::RequestForPaymentDetails
 	pub fn send_payment_details(
 		&self, request_id: RequestId, counterparty_node_id: &PublicKey, payment: PaymentInfo,
-		created_at: chrono::DateTime<Utc>, expires_at: chrono::DateTime<Utc>,
+		created_at: chrono::DateTime<Utc>,
 	) -> Result<(), APIError> {
 		let (result, response) = {
 			let outer_state_lock = self.per_peer_state.read().unwrap();
@@ -254,7 +253,6 @@ where
 							let channel = OutboundCRChannel::new(
 								params.order.clone(),
 								created_at.clone(),
-								expires_at.clone(),
 								order_id.clone(),
 								payment.clone(),
 							);
@@ -266,7 +264,6 @@ where
 								order_id,
 								order_state: OrderState::Created,
 								created_at,
-								expires_at,
 								payment,
 								channel: None,
 							});
@@ -386,7 +383,6 @@ where
 							order: config.order.clone(),
 							order_state,
 							created_at: config.created_at,
-							expires_at: config.expires_at,
 							payment: config.payment.clone(),
 							channel,
 						});
