@@ -12,7 +12,7 @@
 use super::event::LSPS1ServiceEvent;
 use super::msgs::{
 	ChannelInfo, CreateOrderRequest, CreateOrderResponse, GetInfoResponse, GetOrderRequest,
-	LSPS1Message, LSPS1Request, LSPS1Response, OptionsSupported, OrderId, OrderParams, OrderState,
+	LSPS1Message, LSPS1Options, LSPS1Request, LSPS1Response, OrderId, OrderParameters, OrderState,
 	PaymentInfo, LSPS1_CREATE_ORDER_REQUEST_ORDER_MISMATCH_ERROR_CODE,
 };
 use super::utils::is_valid;
@@ -42,7 +42,7 @@ pub struct LSPS1ServiceConfig {
 	/// A token to be send with each channel request.
 	pub token: Option<String>,
 	/// The options supported by the LSP.
-	pub options_supported: Option<OptionsSupported>,
+	pub supported_options: Option<LSPS1Options>,
 }
 
 struct ChannelStateError(String);
@@ -72,7 +72,7 @@ impl OutboundRequestState {
 }
 
 struct OutboundLSPS1Config {
-	order: OrderParams,
+	order: OrderParameters,
 	created_at: chrono::DateTime<Utc>,
 	payment: PaymentInfo,
 }
@@ -84,7 +84,7 @@ struct OutboundCRChannel {
 
 impl OutboundCRChannel {
 	fn new(
-		order: OrderParams, created_at: chrono::DateTime<Utc>, order_id: OrderId,
+		order: OrderParameters, created_at: chrono::DateTime<Utc>, order_id: OrderId,
 		payment: PaymentInfo,
 	) -> Self {
 		Self {
@@ -97,10 +97,10 @@ impl OutboundCRChannel {
 		Ok(())
 	}
 
-	fn check_order_validity(&self, options_supported: &OptionsSupported) -> bool {
+	fn check_order_validity(&self, supported_options: &LSPS1Options) -> bool {
 		let order = &self.config.order;
 
-		is_valid(order, options_supported)
+		is_valid(order, supported_options)
 	}
 }
 
@@ -170,7 +170,7 @@ where
 		let response = LSPS1Response::GetInfo(GetInfoResponse {
 			options: self
 				.config
-				.options_supported
+				.supported_options
 				.clone()
 				.ok_or(LightningError {
 					err: format!("Configuration for LSP server not set."),
@@ -187,13 +187,13 @@ where
 	fn handle_create_order_request(
 		&self, request_id: RequestId, counterparty_node_id: &PublicKey, params: CreateOrderRequest,
 	) -> Result<(), LightningError> {
-		if !is_valid(&params.order, &self.config.options_supported.as_ref().unwrap()) {
+		if !is_valid(&params.order, &self.config.supported_options.as_ref().unwrap()) {
 			let response = LSPS1Response::CreateOrderError(ResponseError {
 				code: LSPS1_CREATE_ORDER_REQUEST_ORDER_MISMATCH_ERROR_CODE,
 				message: format!("Order does not match options supported by LSP server"),
 				data: Some(format!(
 					"Supported options are {:?}",
-					&self.config.options_supported.as_ref().unwrap()
+					&self.config.supported_options.as_ref().unwrap()
 				)),
 			});
 			let msg = LSPS1Message::Response(request_id, response).into();

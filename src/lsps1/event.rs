@@ -9,34 +9,52 @@
 
 //! Contains LSPS1 event types
 
-use super::msgs::{ChannelInfo, OptionsSupported, OrderId, OrderParams, PaymentInfo};
+use super::msgs::{ChannelInfo, LSPS1Options, OrderId, OrderParameters, PaymentInfo};
 
-use crate::lsps0::ser::RequestId;
-use crate::prelude::String;
+use crate::lsps0::ser::{RequestId, ResponseError};
 
 use bitcoin::secp256k1::PublicKey;
 
 /// An event which an LSPS1 client should take some action in response to.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LSPS1ClientEvent {
-	/// Information from the LSP about their supported protocol options.
+	/// A request previously issued via [`LSPS1ClientHandler::request_supported_options`]
+	/// succeeded as the LSP returned the options it supports.
 	///
 	/// You must check whether LSP supports the parameters the client wants and then call
-	/// [`LSPS1ClientHandler::place_order`] to place an order.
+	/// [`LSPS1ClientHandler::create_order`] to place an order.
 	///
-	/// [`LSPS1ClientHandler::place_order`]: crate::lsps1::client::LSPS1ClientHandler::place_order
-	GetInfoResponse {
-		/// This is a randomly generated identifier used to track the channel state.
+	/// [`LSPS1ClientHandler::request_supported_options`]: crate::lsps1::client::LSPS1ClientHandler::request_supported_options
+	/// [`LSPS1ClientHandler::create_order`]: crate::lsps1::client::LSPS1ClientHandler::create_order
+	SupportedOptionsReady {
+		/// The identifier of the issued LSPS1 `get_info` request, as returned by
+		/// [`LSPS1ClientHandler::request_supported_options`]
 		///
-		/// It is not related in anyway to the eventual lightning channel id.
-		/// It needs to be passed to [`LSPS1ClientHandler::place_order`].
+		/// This can be used to track which request this event corresponds to.
 		///
-		/// [`LSPS1ClientHandler::place_order`]: crate::lsps1::client::LSPS1ClientHandler::place_order
-		user_channel_id: u128,
+		/// [`LSPS1ClientHandler::request_supported_options`]: crate::lsps1::client::LSPS1ClientHandler::request_supported_options
+		request_id: RequestId,
 		/// The node id of the LSP that provided this response.
 		counterparty_node_id: PublicKey,
 		/// All options supported by the LSP.
-		options_supported: OptionsSupported,
+		supported_options: LSPS1Options,
+	},
+	/// A request previously issued via [`LSPS1ClientHandler::request_supported_options`]
+	/// failed as the LSP returned an error response.
+	///
+	/// [`LSPS1ClientHandler::request_supported_options`]: crate::lsps1::client::LSPS1ClientHandler::request_supported_options
+	SupportedOptionsRequestFailed {
+		/// The identifier of the issued LSPS1 `get_info` request, as returned by
+		/// [`LSPS1ClientHandler::request_supported_options`]
+		///
+		/// This can be used to track which request this event corresponds to.
+		///
+		/// [`LSPS1ClientHandler::request_supported_options`]: crate::lsps1::client::LSPS1ClientHandler::request_supported_options
+		request_id: RequestId,
+		/// The node id of the LSP that provided this response.
+		counterparty_node_id: PublicKey,
+		/// The error that was returned.
+		error: ResponseError,
 	},
 	/// Confirmation from the LSP about the order created by the client.
 	///
@@ -48,21 +66,67 @@ pub enum LSPS1ClientEvent {
 	/// to get information from LSP about progress of the order.
 	///
 	/// [`LSPS1ClientHandler::check_order_status`]: crate::lsps1::client::LSPS1ClientHandler::check_order_status
-	DisplayOrder {
-		/// This is a randomly generated identifier used to track the channel state.
-		/// It is not related in anyway to the eventual lightning channel id.
-		/// It needs to be passed to [`LSPS1ClientHandler::check_order_status`].
+	OrderCreated {
+		/// The identifier of the issued LSPS1 `create_order` request, as returned by
+		/// [`LSPS1ClientHandler::create_order`]
 		///
-		/// [`LSPS1ClientHandler::check_order_status`]: crate::lsps1::client::LSPS1ClientHandler::check_order_status
-		user_channel_id: u128,
+		/// This can be used to track which request this event corresponds to.
+		///
+		/// [`LSPS1ClientHandler::create_order`]: crate::lsps1::client::LSPS1ClientHandler::create_order
+		request_id: RequestId,
 		/// The node id of the LSP.
 		counterparty_node_id: PublicKey,
+		/// The id of the channel order.
+		order_id: OrderId,
 		/// The order created by client and approved by LSP.
-		order: OrderParams,
+		order: OrderParameters,
 		/// The details regarding payment of the order
 		payment: PaymentInfo,
 		/// The details regarding state of the channel ordered.
 		channel: Option<ChannelInfo>,
+	},
+	/// Information from the LSP about the status of a previously created order.
+	///
+	/// Will be emitted in response to calling [`LSPS1ClientHandler::check_order_status`].
+	///
+	/// [`LSPS1ClientHandler::check_order_status`]: crate::lsps1::client::LSPS1ClientHandler::check_order_status
+	OrderStatus {
+		/// The identifier of the issued LSPS1 `get_order` request, as returned by
+		/// [`LSPS1ClientHandler::check_order_status`]
+		///
+		/// This can be used to track which request this event corresponds to.
+		///
+		/// [`LSPS1ClientHandler::check_order_status`]: crate::lsps1::client::LSPS1ClientHandler::check_order_status
+		request_id: RequestId,
+		/// The node id of the LSP.
+		counterparty_node_id: PublicKey,
+		/// The id of the channel order.
+		order_id: OrderId,
+		/// The order created by client and approved by LSP.
+		order: OrderParameters,
+		/// The details regarding payment of the order
+		payment: PaymentInfo,
+		/// The details regarding state of the channel ordered.
+		channel: Option<ChannelInfo>,
+	},
+	/// A request previously issued via [`LSPS1ClientHandler::create_order`] or [`LSPS1ClientHandler::check_order_status`].
+	/// failed as the LSP returned an error response.
+	///
+	/// [`LSPS1ClientHandler::create_order`]: crate::lsps1::client::LSPS1ClientHandler::create_order
+	/// [`LSPS1ClientHandler::check_order_status`]: crate::lsps1::client::LSPS1ClientHandler::check_order_status
+	OrderRequestFailed {
+		/// The identifier of the issued LSPS1 `create_order` or `get_order` request, as returned by
+		/// [`LSPS1ClientHandler::create_order`] or [`LSPS1ClientHandler::check_order_status`].
+		///
+		/// This can be used to track which request this event corresponds to.
+		///
+		/// [`LSPS1ClientHandler::create_order`]: crate::lsps1::client::LSPS1ClientHandler::create_order
+		/// [`LSPS1ClientHandler::check_order_status`]: crate::lsps1::client::LSPS1ClientHandler::check_order_status
+		request_id: RequestId,
+		/// The node id of the LSP.
+		counterparty_node_id: PublicKey,
+		/// The error that was returned.
+		error: ResponseError,
 	},
 }
 
@@ -85,7 +149,7 @@ pub enum LSPS1ServiceEvent {
 		/// The node id of the client making the information request.
 		counterparty_node_id: PublicKey,
 		/// The order requested by the client.
-		order: OrderParams,
+		order: OrderParameters,
 	},
 	/// A request from client to check the status of the payment.
 	///

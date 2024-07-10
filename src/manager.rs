@@ -96,7 +96,7 @@ where
 	lsps0_service_handler: Option<LSPS0ServiceHandler>,
 	#[cfg(lsps1_service)]
 	lsps1_service_handler: Option<LSPS1ServiceHandler<ES, CM, C>>,
-	lsps1_client_handler: Option<LSPS1ClientHandler<ES, CM, C>>,
+	lsps1_client_handler: Option<LSPS1ClientHandler<ES>>,
 	lsps2_service_handler: Option<LSPS2ServiceHandler<CM>>,
 	lsps2_client_handler: Option<LSPS2ClientHandler<ES>>,
 	service_config: Option<LiquidityServiceConfig>,
@@ -159,8 +159,6 @@ where {
 					entropy_source.clone(),
 					Arc::clone(&pending_messages),
 					Arc::clone(&pending_events),
-					channel_manager.clone(),
-					chain_source.clone(),
 					config.clone(),
 				)
 			})
@@ -227,7 +225,7 @@ where {
 	}
 
 	/// Returns a reference to the LSPS1 client-side handler.
-	pub fn lsps1_client_handler(&self) -> Option<&LSPS1ClientHandler<ES, CM, C>> {
+	pub fn lsps1_client_handler(&self) -> Option<&LSPS1ClientHandler<ES>> {
 		self.lsps1_client_handler.as_ref()
 	}
 

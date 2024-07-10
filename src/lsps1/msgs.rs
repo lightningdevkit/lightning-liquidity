@@ -1,10 +1,8 @@
 //! Message, request, and other primitive types used to implement LSPS1.
 
-use crate::lsps0::ser::{
-	string_amount, string_amount_option, u32_fee_rate, LSPSMessage, RequestId, ResponseError,
-};
+use crate::lsps0::ser::{string_amount, u32_fee_rate, LSPSMessage, RequestId, ResponseError};
 
-use crate::prelude::{String, Vec};
+use crate::prelude::String;
 
 use bitcoin::address::{Address, NetworkUnchecked};
 use bitcoin::{FeeRate, OutPoint};
@@ -39,7 +37,7 @@ pub struct GetInfoRequest {}
 
 /// An object representing the supported protocol options.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct OptionsSupported {
+pub struct LSPS1Options {
 	/// The smallest number of confirmations needed for the LSP to accept a channel as confirmed.
 	pub min_required_channel_confirmations: u16,
 	/// The smallest number of blocks in which the LSP can confirm the funding transaction.
@@ -73,7 +71,7 @@ pub struct OptionsSupported {
 pub struct GetInfoResponse {
 	/// All options supported by the LSP.
 	#[serde(flatten)]
-	pub options: OptionsSupported,
+	pub options: LSPS1Options,
 }
 
 /// A request made to an LSP to create an order.
@@ -84,12 +82,12 @@ pub struct GetInfoResponse {
 pub struct CreateOrderRequest {
 	/// The order made.
 	#[serde(flatten)]
-	pub order: OrderParams,
+	pub order: OrderParameters,
 }
 
 /// An object representing an LSPS1 channel order.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct OrderParams {
+pub struct OrderParameters {
 	/// Indicates how many satoshi the LSP will provide on their side.
 	#[serde(with = "string_amount")]
 	pub lsp_balance_sat: u64,
@@ -120,7 +118,7 @@ pub struct CreateOrderResponse {
 	pub order_id: OrderId,
 	/// The parameters of channel order.
 	#[serde(flatten)]
-	pub order: OrderParams,
+	pub order: OrderParameters,
 	/// The datetime when the order was created
 	pub created_at: chrono::DateTime<Utc>,
 	/// The current state of the order.
@@ -328,7 +326,7 @@ mod tests {
 		let min_channel_balance_sat = 100_000;
 		let max_channel_balance_sat = 100_000_000;
 
-		let options_supported = OptionsSupported {
+		let options_supported = LSPS1Options {
 			min_required_channel_confirmations,
 			min_funding_confirms_within_blocks,
 			supports_zero_channel_reserve,
