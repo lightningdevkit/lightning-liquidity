@@ -76,7 +76,6 @@ impl TryFrom<LSPSMessage> for LSPS0Message {
 		match message {
 			LSPSMessage::Invalid(_) => Err(()),
 			LSPSMessage::LSPS0(message) => Ok(message),
-			#[cfg(lsps1)]
 			LSPSMessage::LSPS1(_) => Err(()),
 			LSPSMessage::LSPS2(_) => Err(()),
 		}

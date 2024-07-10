@@ -85,7 +85,6 @@ fn invoice_generation_flow() {
 	let promise_secret = [42; 32];
 	let lsps2_service_config = LSPS2ServiceConfig { promise_secret };
 	let service_config = LiquidityServiceConfig {
-		#[cfg(lsps1)]
 		lsps1_service_config: None,
 		lsps2_service_config: Some(lsps2_service_config),
 		advertise_service: true,
@@ -93,7 +92,6 @@ fn invoice_generation_flow() {
 
 	let lsps2_client_config = LSPS2ClientConfig::default();
 	let client_config = LiquidityClientConfig {
-		#[cfg(lsps1)]
 		lsps1_client_config: None,
 		lsps2_client_config: Some(lsps2_client_config),
 	};

@@ -16,7 +16,6 @@
 //! [`LiquidityManager::get_and_clear_pending_events`]: crate::LiquidityManager::get_and_clear_pending_events
 
 use crate::lsps0;
-#[cfg(lsps1)]
 use crate::lsps1;
 use crate::lsps2;
 use crate::prelude::{Vec, VecDeque};
@@ -98,10 +97,8 @@ pub enum Event {
 	/// An LSPS0 client event.
 	LSPS0Client(lsps0::event::LSPS0ClientEvent),
 	/// An LSPS1 (Channel Request) client event.
-	#[cfg(lsps1)]
 	LSPS1Client(lsps1::event::LSPS1ClientEvent),
 	/// An LSPS1 (Channel Request) server event.
-	#[cfg(lsps1)]
 	LSPS1Service(lsps1::event::LSPS1ServiceEvent),
 	/// An LSPS2 (JIT Channel) client event.
 	LSPS2Client(lsps2::event::LSPS2ClientEvent),
