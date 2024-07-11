@@ -20,12 +20,10 @@ use crate::message_queue::MessageQueue;
 
 use crate::events::{Event, EventQueue};
 use crate::lsps0::ser::{ProtocolMessageHandler, RequestId, ResponseError};
-use crate::prelude::{HashMap, String, ToString};
+use crate::prelude::{HashMap, String};
 use crate::sync::{Arc, Mutex, RwLock};
 use crate::utils;
 
-use lightning::chain::Filter;
-use lightning::ln::channelmanager::AChannelManager;
 use lightning::ln::msgs::{ErrorAction, LightningError};
 use lightning::sign::EntropySource;
 use lightning::util::errors::APIError;
@@ -39,8 +37,6 @@ use core::ops::Deref;
 /// Server-side configuration options for LSPS1 channel requests.
 #[derive(Clone, Debug)]
 pub struct LSPS1ServiceConfig {
-	/// A token to be send with each channel request.
-	pub token: Option<String>,
 	/// The options supported by the LSP.
 	pub supported_options: Option<LSPS1Options>,
 }
@@ -49,7 +45,7 @@ struct ChannelStateError(String);
 
 impl From<ChannelStateError> for LightningError {
 	fn from(value: ChannelStateError) -> Self {
-		LightningError { err: value.0, action: ErrorAction::IgnoreAndLog(Level::Info) }
+		LightningError { err: value.0, action: ErrorAction::IgnoreAndLog(Level::Debug) }
 	}
 }
 
@@ -57,7 +53,6 @@ impl From<ChannelStateError> for LightningError {
 enum OutboundRequestState {
 	OrderCreated { order_id: OrderId },
 	WaitingPayment { order_id: OrderId },
-	Ready,
 }
 
 impl OutboundRequestState {
@@ -96,67 +91,38 @@ impl OutboundCRChannel {
 		self.state = self.state.awaiting_payment()?;
 		Ok(())
 	}
-
-	fn check_order_validity(&self, supported_options: &LSPS1Options) -> bool {
-		let order = &self.config.order;
-
-		is_valid(order, supported_options)
-	}
 }
 
 #[derive(Default)]
 struct PeerState {
 	outbound_channels_by_order_id: HashMap<OrderId, OutboundCRChannel>,
-	request_to_cid: HashMap<RequestId, u128>,
 	pending_requests: HashMap<RequestId, LSPS1Request>,
 }
 
-impl PeerState {
-	fn insert_outbound_channel(&mut self, order_id: OrderId, channel: OutboundCRChannel) {
-		self.outbound_channels_by_order_id.insert(order_id, channel);
-	}
-
-	fn insert_request(&mut self, request_id: RequestId, channel_id: u128) {
-		self.request_to_cid.insert(request_id, channel_id);
-	}
-
-	fn remove_outbound_channel(&mut self, order_id: OrderId) {
-		self.outbound_channels_by_order_id.remove(&order_id);
-	}
-}
-
 /// The main object allowing to send and receive LSPS1 messages.
-pub struct LSPS1ServiceHandler<ES: Deref, CM: Deref + Clone, C: Deref>
+pub struct LSPS1ServiceHandler<ES: Deref>
 where
 	ES::Target: EntropySource,
-	CM::Target: AChannelManager,
-	C::Target: Filter,
 {
 	entropy_source: ES,
-	channel_manager: CM,
-	chain_source: Option<C>,
 	pending_messages: Arc<MessageQueue>,
 	pending_events: Arc<EventQueue>,
 	per_peer_state: RwLock<HashMap<PublicKey, Mutex<PeerState>>>,
 	config: LSPS1ServiceConfig,
 }
 
-impl<ES: Deref, CM: Deref + Clone, C: Deref> LSPS1ServiceHandler<ES, CM, C>
+impl<ES: Deref> LSPS1ServiceHandler<ES>
 where
 	ES::Target: EntropySource,
-	CM::Target: AChannelManager,
-	C::Target: Filter,
 	ES::Target: EntropySource,
 {
 	/// Constructs a `LSPS1ServiceHandler`.
 	pub(crate) fn new(
 		entropy_source: ES, pending_messages: Arc<MessageQueue>, pending_events: Arc<EventQueue>,
-		channel_manager: CM, chain_source: Option<C>, config: LSPS1ServiceConfig,
+		config: LSPS1ServiceConfig,
 	) -> Self {
 		Self {
 			entropy_source,
-			channel_manager,
-			chain_source,
 			pending_messages,
 			pending_events,
 			per_peer_state: RwLock::new(HashMap::new()),
@@ -174,7 +140,7 @@ where
 				.clone()
 				.ok_or(LightningError {
 					err: format!("Configuration for LSP server not set."),
-					action: ErrorAction::IgnoreAndLog(Level::Info),
+					action: ErrorAction::IgnoreAndLog(Level::Debug),
 				})
 				.unwrap(),
 		});
@@ -203,7 +169,7 @@ where
 					"Client order does not match any supported options: {:?}",
 					params.order
 				),
-				action: ErrorAction::IgnoreAndLog(Level::Info),
+				action: ErrorAction::IgnoreAndLog(Level::Debug),
 			});
 		}
 
@@ -257,7 +223,9 @@ where
 								payment.clone(),
 							);
 
-							peer_state_lock.insert_outbound_channel(order_id.clone(), channel);
+							peer_state_lock
+								.outbound_channels_by_order_id
+								.insert(order_id.clone(), channel);
 
 							let response = LSPS1Response::CreateOrder(CreateOrderResponse {
 								order: params.order,
@@ -318,7 +286,7 @@ where
 							"Received get order request for unknown order id {:?}",
 							params.order_id
 						),
-						action: ErrorAction::IgnoreAndLog(Level::Info),
+						action: ErrorAction::IgnoreAndLog(Level::Debug),
 					})?;
 
 				if let Err(e) = outbound_channel.awaiting_payment() {
@@ -345,8 +313,11 @@ where
 			},
 			None => {
 				return Err(LightningError {
-					err: format!("Received error response for a create order request from an unknown counterparty ({:?})", counterparty_node_id),
-					action: ErrorAction::IgnoreAndLog(Level::Info),
+					err: format!(
+						"Received error response for a create order request from an unknown counterparty ({:?})",
+						counterparty_node_id
+					),
+					action: ErrorAction::IgnoreAndLog(Level::Debug),
 				});
 			},
 		}
@@ -422,12 +393,9 @@ where
 	}
 }
 
-impl<ES: Deref, CM: Deref + Clone, C: Deref> ProtocolMessageHandler
-	for LSPS1ServiceHandler<ES, CM, C>
+impl<ES: Deref> ProtocolMessageHandler for LSPS1ServiceHandler<ES>
 where
 	ES::Target: EntropySource,
-	CM::Target: AChannelManager,
-	C::Target: Filter,
 {
 	type ProtocolMessage = LSPS1Message;
 	const PROTOCOL_NUMBER: Option<u16> = Some(1);
@@ -452,7 +420,13 @@ where
 					false,
 					"Service handler received LSPS1 response message. This should never happen."
 				);
-				Err(LightningError { err: format!("Service handler received LSPS1 response message from node {:?}. This should never happen.", counterparty_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)})
+				Err(LightningError {
+					err: format!(
+						"Service handler received LSPS1 response message from node {:?}. This should never happen.",
+						counterparty_node_id
+					),
+					action: ErrorAction::IgnoreAndLog(Level::Debug),
+				})
 			},
 		}
 	}

@@ -92,7 +92,7 @@ where
 	ignored_peers: RwLock<HashSet<PublicKey>>,
 	lsps0_client_handler: LSPS0ClientHandler<ES>,
 	lsps0_service_handler: Option<LSPS0ServiceHandler>,
-	lsps1_service_handler: Option<LSPS1ServiceHandler<ES, CM, C>>,
+	lsps1_service_handler: Option<LSPS1ServiceHandler<ES>>,
 	lsps1_client_handler: Option<LSPS1ClientHandler<ES>>,
 	lsps2_service_handler: Option<LSPS2ServiceHandler<CM>>,
 	lsps2_client_handler: Option<LSPS2ClientHandler<ES>>,
@@ -172,8 +172,6 @@ where {
 					entropy_source.clone(),
 					Arc::clone(&pending_messages),
 					Arc::clone(&pending_events),
-					channel_manager.clone(),
-					chain_source.clone(),
 					config.clone(),
 				)
 			})
@@ -225,7 +223,7 @@ where {
 	}
 
 	/// Returns a reference to the LSPS1 server-side handler.
-	pub fn lsps1_service_handler(&self) -> Option<&LSPS1ServiceHandler<ES, CM, C>> {
+	pub fn lsps1_service_handler(&self) -> Option<&LSPS1ServiceHandler<ES>> {
 		self.lsps1_service_handler.as_ref()
 	}
 
