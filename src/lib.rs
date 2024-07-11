@@ -41,8 +41,6 @@ mod prelude {
 
 pub mod events;
 pub mod lsps0;
-// TODO: disallow warnings once the implementation is finished
-#[allow(warnings)]
 pub mod lsps1;
 pub mod lsps2;
 mod manager;
