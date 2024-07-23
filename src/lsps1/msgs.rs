@@ -104,7 +104,7 @@ pub struct OrderParameters {
 	/// Indicates how long the channel is leased for in block time.
 	pub channel_expiry_blocks: u32,
 	/// May contain arbitrary associated data like a coupon code or a authentication token.
-	pub token: String,
+	pub token: Option<String>,
 	/// The address where the LSP will send the funds if the order fails.
 	pub refund_onchain_address: Option<Address<NetworkUnchecked>>,
 	/// Indicates if the channel should be announced to the network.
