@@ -122,17 +122,7 @@ where {
 		let pending_events = Arc::new(EventQueue::new());
 		let ignored_peers = RwLock::new(HashSet::new());
 
-		let lsps0_client_handler = LSPS0ClientHandler::new(
-			entropy_source.clone(),
-			Arc::clone(&pending_messages),
-			Arc::clone(&pending_events),
-		);
-
-		let lsps0_service_handler = if service_config.is_some() {
-			Some(LSPS0ServiceHandler::new(vec![], Arc::clone(&pending_messages)))
-		} else {
-			None
-		};
+		let mut supported_protocols = Vec::new();
 
 		let lsps2_client_handler = client_config.as_ref().and_then(|config| {
 			config.lsps2_client_config.map(|config| {
@@ -146,6 +136,11 @@ where {
 		});
 		let lsps2_service_handler = service_config.as_ref().and_then(|config| {
 			config.lsps2_service_config.as_ref().map(|config| {
+				if let Some(number) =
+					<LSPS2ServiceHandler<CM> as ProtocolMessageHandler>::PROTOCOL_NUMBER
+				{
+					supported_protocols.push(number);
+				}
 				LSPS2ServiceHandler::new(
 					Arc::clone(&pending_messages),
 					Arc::clone(&pending_events),
@@ -169,6 +164,11 @@ where {
 		});
 
 		let lsps1_service_handler = service_config.as_ref().and_then(|config| {
+			if let Some(number) =
+				<LSPS1ServiceHandler<ES> as ProtocolMessageHandler>::PROTOCOL_NUMBER
+			{
+				supported_protocols.push(number);
+			}
 			config.lsps1_service_config.as_ref().map(|config| {
 				LSPS1ServiceHandler::new(
 					entropy_source.clone(),
@@ -180,6 +180,18 @@ where {
 				)
 			})
 		});
+
+		let lsps0_client_handler = LSPS0ClientHandler::new(
+			entropy_source.clone(),
+			Arc::clone(&pending_messages),
+			Arc::clone(&pending_events),
+		);
+
+		let lsps0_service_handler = if service_config.is_some() {
+			Some(LSPS0ServiceHandler::new(vec![], Arc::clone(&pending_messages)))
+		} else {
+			None
+		};
 
 		Self {
 			pending_messages,
