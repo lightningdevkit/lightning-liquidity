@@ -12,6 +12,5 @@
 pub mod client;
 pub mod event;
 pub mod msgs;
-#[cfg(lsps1_service)]
 pub mod service;
 pub(crate) mod utils;
