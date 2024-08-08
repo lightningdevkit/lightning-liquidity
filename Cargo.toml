@@ -43,3 +43,10 @@ lightning-background-processor = { version = "0.0.123", default-features = false
 # lightning-background-processor = { path = "../rust-lightning/lightning-background-processor", default-features = false, features = ["std"] }
 proptest = "1.0.0"
 tokio = { version = "1.35", default-features = false, features = [ "rt-multi-thread", "time", "sync", "macros" ] }
+
+[lints.rust.unexpected_cfgs]
+level = "forbid"
+# When adding a new cfg attribute, ensure that it is added to this list.
+check-cfg = [
+	"cfg(lsps1_service)",
+]

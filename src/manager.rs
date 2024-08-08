@@ -11,6 +11,7 @@ use crate::message_queue::MessageQueue;
 
 use crate::lsps1::client::{LSPS1ClientConfig, LSPS1ClientHandler};
 use crate::lsps1::msgs::LSPS1Message;
+#[cfg(lsps1_service)]
 use crate::lsps1::service::{LSPS1ServiceConfig, LSPS1ServiceHandler};
 
 use crate::lsps2::client::{LSPS2ClientConfig, LSPS2ClientHandler};
@@ -41,6 +42,7 @@ const LSPS_FEATURE_BIT: usize = 729;
 /// to provide liquidity services to clients.
 pub struct LiquidityServiceConfig {
 	/// Optional server-side configuration for LSPS1 channel requests.
+	#[cfg(lsps1_service)]
 	pub lsps1_service_config: Option<LSPS1ServiceConfig>,
 	/// Optional server-side configuration for JIT channels
 	/// should you want to support them.
@@ -92,6 +94,7 @@ where
 	ignored_peers: RwLock<HashSet<PublicKey>>,
 	lsps0_client_handler: LSPS0ClientHandler<ES>,
 	lsps0_service_handler: Option<LSPS0ServiceHandler>,
+	#[cfg(lsps1_service)]
 	lsps1_service_handler: Option<LSPS1ServiceHandler<ES, CM, C>>,
 	lsps1_client_handler: Option<LSPS1ClientHandler<ES, CM, C>>,
 	lsps2_service_handler: Option<LSPS2ServiceHandler<CM>>,
@@ -163,6 +166,7 @@ where {
 			})
 		});
 
+		#[cfg(lsps1_service)]
 		let lsps1_service_handler = service_config.as_ref().and_then(|config| {
 			if let Some(number) =
 				<LSPS1ServiceHandler<ES> as ProtocolMessageHandler>::PROTOCOL_NUMBER
@@ -201,6 +205,7 @@ where {
 			lsps0_client_handler,
 			lsps0_service_handler,
 			lsps1_client_handler,
+			#[cfg(lsps1_service)]
 			lsps1_service_handler,
 			lsps2_client_handler,
 			lsps2_service_handler,
@@ -227,6 +232,7 @@ where {
 	}
 
 	/// Returns a reference to the LSPS1 server-side handler.
+	#[cfg(lsps1_service)]
 	pub fn lsps1_service_handler(&self) -> Option<&LSPS1ServiceHandler<ES, CM, C>> {
 		self.lsps1_service_handler.as_ref()
 	}
@@ -420,15 +426,18 @@ where {
 					},
 				}
 			},
-			LSPSMessage::LSPS1(msg @ LSPS1Message::Request(..)) => {
+			LSPSMessage::LSPS1(_msg @ LSPS1Message::Request(..)) => {
+				#[cfg(lsps1_service)]
 				match &self.lsps1_service_handler {
 					Some(lsps1_service_handler) => {
-						lsps1_service_handler.handle_message(msg, sender_node_id)?;
+						lsps1_service_handler.handle_message(_msg, sender_node_id)?;
 					},
 					None => {
 						return Err(LightningError { err: format!("Received LSPS1 request message without LSPS1 service handler configured. From node = {:?}", sender_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
 					},
 				}
+				#[cfg(not(lsps1_service))]
+				return Err(LightningError { err: format!("Received LSPS1 request message without LSPS1 service handler configured. From node = {:?}", sender_node_id), action: ErrorAction::IgnoreAndLog(Level::Info)});
 			},
 			LSPSMessage::LSPS2(msg @ LSPS2Message::Response(..)) => {
 				match &self.lsps2_client_handler {
