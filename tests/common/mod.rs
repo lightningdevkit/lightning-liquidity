@@ -362,9 +362,6 @@ impl ScoreUpdate for TestScorer {
 	fn time_passed(&mut self, _: Duration) {}
 }
 
-#[cfg(c_bindings)]
-impl lightning::routing::scoring::Score for TestScorer {}
-
 impl Drop for TestScorer {
 	fn drop(&mut self) {
 		if std::thread::panicking() {
